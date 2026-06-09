@@ -21,11 +21,16 @@ class Settings(BaseSettings):
     NOTIFY_EMAIL_TO: str = ""          # where to receive (blank = same as EMAIL)
     # Resend HTTP API (works on Render where SMTP is blocked). If set, used over SMTP.
     RESEND_API_KEY: str = ""
-    RESEND_FROM: str = "Divya Handmade <onboarding@resend.dev>"
+    RESEND_FROM: str = "kirti thread art <onboarding@resend.dev>"
     # whatsapp providers
     CALLMEBOT_APIKEY: str = ""
     GREENAPI_INSTANCE: str = ""
     GREENAPI_TOKEN: str = ""
+
+    # ---- Cloudinary image/video storage (persists across Render restarts) ----
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
 
     # ---- Razorpay payment gateway (optional, auto-verified payments) ----
     RAZORPAY_KEY_ID: str = ""
