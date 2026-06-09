@@ -9,6 +9,8 @@ class VariantIn(BaseModel):
     size: str = ""
     color: str = ""
     stock: int = 0
+    price: float = 0  # 0 = use product base price
+    mrp: float = 0    # 0 = use product base mrp
 
 
 class VariantOut(VariantIn):
@@ -81,6 +83,7 @@ class OrderItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     product_id: Optional[int]
+    product_slug: str = ""
     product_name: str
     price: float
     quantity: int
@@ -276,6 +279,64 @@ class CredentialsUpdate(BaseModel):
     current_password: str
     new_username: str = ""
     new_password: str = ""
+
+
+# ---------- Customer accounts ----------
+class UserRegister(BaseModel):
+    name: str
+    email: str
+    password: str
+    phone: str = ""
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class UserProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    email: str
+    phone: str = ""
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    pincode: str = ""
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+class AdminCustomerOut(BaseModel):
+    """Customer info for the admin panel — never includes the password."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    email: str
+    phone: str = ""
+    city: str = ""
+    state: str = ""
+    pincode: str = ""
+    created_at: datetime
+    order_count: int = 0
+
+
+class AdminResetPassword(BaseModel):
+    new_password: str
 
 
 # ---------- Config (public store info) ----------

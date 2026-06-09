@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import Base, engine
-from .routers import products, orders, admin, upload, categories
+from .routers import products, orders, admin, upload, categories, users
 
 # create tables
 Base.metadata.create_all(bind=engine)
@@ -36,6 +36,7 @@ app.include_router(admin.router)
 app.include_router(upload.router)
 app.include_router(upload.public_router)
 app.include_router(categories.router)
+app.include_router(users.router)
 
 
 @app.get("/api/health")

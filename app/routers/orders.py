@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..auth import optional_user
 from ..config import settings
 from ..store import get_settings
 from ..utils import build_whatsapp_url, calc_shipping, calc_cod_fee, apply_coupon
@@ -16,6 +17,22 @@ from ..notify import notify_owner_order, send_contact_email
 from .. import models, schemas, razorpay_client
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
+
+
+def _match_variant(product, size, color):
+    """Find the variant row matching the chosen size+color, if any."""
+    for v in product.variants:
+        if v.size == size and v.color == color:
+            return v
+    return None
+
+
+def _unit_price(product, size, color):
+    """Per-unit price: variant price if set (>0), else the product base price."""
+    v = _match_variant(product, size, color)
+    if v and v.price and v.price > 0:
+        return v.price
+    return product.price
 
 
 def _price_cart(db: Session, items):
@@ -30,14 +47,15 @@ def _price_cart(db: Session, items):
         if not product or not product.is_active:
             raise HTTPException(400, f"Product {item.product_id} unavailable")
         qty = max(1, item.quantity)
-        subtotal += product.price * qty
-        weight += (product.weight_grams or 500) * qty
         size = getattr(item, "size", "")
         color = getattr(item, "color", "")
+        unit = _unit_price(product, size, color)
+        subtotal += unit * qty
+        weight += (product.weight_grams or 500) * qty
         label = getattr(item, "variant", "") or ", ".join(
             [x for x in [f"Size: {size}" if size else "", f"Color: {color}" if color else ""] if x]
         )
-        priced.append((product, qty, label, size, color))
+        priced.append((product, qty, label, size, color, unit))
     return round(subtotal, 2), weight, priced
 
 
@@ -91,7 +109,11 @@ def razorpay_create(payload: schemas.ShippingQuoteRequest, db: Session = Depends
 
 
 @router.post("", response_model=schemas.OrderCreateResponse)
-def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
+def create_order(
+    payload: schemas.OrderCreate,
+    db: Session = Depends(get_db),
+    user=Depends(optional_user),
+):
     if not payload.items:
         raise HTTPException(400, "Cart is empty")
 
@@ -119,6 +141,7 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
     cod = calc_cod_fee(cfg, method)
 
     order = models.Order(
+        user_id=user.id if user else None,
         customer_name=payload.customer_name,
         phone=payload.phone,
         email=payload.email,
@@ -141,7 +164,7 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
     )
 
     low_stock_alerts = []
-    for product, qty, label, size, color in priced:
+    for product, qty, label, size, color, unit_price in priced:
         if product.variants:
             # per-variant stock: find the matching size+color row
             match = next(
@@ -170,13 +193,23 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
             models.OrderItem(
                 product_id=product.id,
                 product_name=product.name,
-                price=product.price,
+                price=unit_price,
                 quantity=qty,
                 variant=label,
             )
         )
 
     db.add(order)
+
+    # remember the customer's latest details on their account for next time
+    if user:
+        user.name = payload.customer_name or user.name
+        user.phone = payload.phone or user.phone
+        user.address = payload.address or user.address
+        user.city = payload.city or user.city
+        user.state = payload.state or user.state
+        user.pincode = payload.pincode or user.pincode
+
     db.commit()
     db.refresh(order)
 

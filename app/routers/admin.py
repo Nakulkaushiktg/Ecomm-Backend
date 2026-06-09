@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -14,6 +15,41 @@ from ..notify import send_customer_email
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+# ---------- Customers ----------
+@router.get("/customers", response_model=List[schemas.AdminCustomerOut])
+def list_customers(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    users = db.query(models.User).order_by(models.User.created_at.desc()).all()
+    counts = dict(
+        db.query(models.Order.user_id, func.count(models.Order.id))
+        .filter(models.Order.user_id.isnot(None))
+        .group_by(models.Order.user_id)
+        .all()
+    )
+    out = []
+    for u in users:
+        item = schemas.AdminCustomerOut.model_validate(u)
+        item.order_count = counts.get(u.id, 0)
+        out.append(item)
+    return out
+
+
+@router.put("/customers/{user_id}/reset-password")
+def reset_customer_password(
+    user_id: int,
+    payload: schemas.AdminResetPassword,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_admin),
+):
+    if len(payload.new_password) < 6:
+        raise HTTPException(400, "New password must be at least 6 characters")
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Customer not found")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"ok": True, "email": user.email}
 
 
 @router.post("/login", response_model=schemas.TokenResponse)
@@ -71,7 +107,10 @@ def _apply_variants(product, variant_list):
     total = 0
     for v in variant_list:
         product.variants.append(
-            models.ProductVariant(size=v.size, color=v.color, stock=max(0, v.stock))
+            models.ProductVariant(
+                size=v.size, color=v.color, stock=max(0, v.stock),
+                price=max(0, v.price), mrp=max(0, v.mrp),
+            )
         )
         total += max(0, v.stock)
     if variant_list:

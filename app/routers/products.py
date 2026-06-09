@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..auth import require_user, optional_user
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/products", tags=["products"])
@@ -74,15 +75,51 @@ def list_reviews(slug: str, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/{slug}/reviews", response_model=schemas.ReviewOut)
-def add_review(slug: str, payload: schemas.ReviewCreate, db: Session = Depends(get_db)):
+def _has_delivered_purchase(db: Session, user_id: int, product_id: int) -> bool:
+    """True if the user has a delivered order containing this product."""
+    return (
+        db.query(models.Order.id)
+        .join(models.OrderItem, models.OrderItem.order_id == models.Order.id)
+        .filter(
+            models.Order.user_id == user_id,
+            models.Order.status == "delivered",
+            models.OrderItem.product_id == product_id,
+        )
+        .first()
+        is not None
+    )
+
+
+@router.get("/{slug}/can-review")
+def can_review(slug: str, db: Session = Depends(get_db), user=Depends(optional_user)):
+    """Whether the current customer is allowed to review this product."""
+    if not user:
+        return {"can_review": False, "reason": "login"}
     p = db.query(models.Product).filter(models.Product.slug == slug).first()
     if not p:
         raise HTTPException(404, "Product not found")
+    ok = _has_delivered_purchase(db, user.id, p.id)
+    return {"can_review": ok, "reason": "" if ok else "not_delivered"}
+
+
+@router.post("/{slug}/reviews", response_model=schemas.ReviewOut)
+def add_review(
+    slug: str,
+    payload: schemas.ReviewCreate,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    p = db.query(models.Product).filter(models.Product.slug == slug).first()
+    if not p:
+        raise HTTPException(404, "Product not found")
+    # only customers who actually received this product may review it
+    if not _has_delivered_purchase(db, user.id, p.id):
+        raise HTTPException(403, "You can only review products from a delivered order")
     rating = min(5, max(1, payload.rating))
     review = models.Review(
         product_id=p.id,
-        name=payload.name.strip() or "Anonymous",
+        user_id=user.id,
+        name=user.name or "Anonymous",
         rating=rating,
         comment=payload.comment.strip(),
         image_url=payload.image_url.strip(),

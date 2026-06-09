@@ -45,14 +45,34 @@ class ProductVariant(Base):
     size = Column(String(40), default="")
     color = Column(String(60), default="")
     stock = Column(Integer, default=0)
+    price = Column(Float, default=0)  # 0 = use the product's base price
+    mrp = Column(Float, default=0)    # 0 = use the product's base mrp
 
     product = relationship("Product", back_populates="variants")
+
+
+class User(Base):
+    """Customer account (storefront login)."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(150), nullable=False)
+    email = Column(String(150), unique=True, index=True, nullable=False)
+    phone = Column(String(20), default="")
+    password_hash = Column(String(200), nullable=False)
+    address = Column(Text, default="")
+    city = Column(String(100), default="")
+    state = Column(String(100), default="")
+    pincode = Column(String(15), default="")
+    reset_requested = Column(Boolean, default=False)  # customer asked admin to reset
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     customer_name = Column(String(150), nullable=False)
     phone = Column(String(20), nullable=False)
     email = Column(String(150), default="")
@@ -128,6 +148,7 @@ class Review(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     name = Column(String(120), nullable=False)
     rating = Column(Integer, default=5)  # 1..5
     comment = Column(Text, default="")
@@ -147,3 +168,8 @@ class OrderItem(Base):
     variant = Column(String(120), default="")  # e.g. "Size: M, Color: Maroon"
 
     order = relationship("Order", back_populates="items")
+    product = relationship("Product")
+
+    @property
+    def product_slug(self) -> str:
+        return self.product.slug if self.product else ""
