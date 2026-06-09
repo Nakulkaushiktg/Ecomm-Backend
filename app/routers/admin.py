@@ -48,8 +48,30 @@ def reset_customer_password(
     if not user:
         raise HTTPException(404, "Customer not found")
     user.password_hash = hash_password(payload.new_password)
+    user.reset_requested = False
     db.commit()
     return {"ok": True, "email": user.email}
+
+
+@router.delete("/customers/{user_id}")
+def delete_customer(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_admin),
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Customer not found")
+    # keep their past orders/reviews but unlink them from the deleted account
+    db.query(models.Order).filter(models.Order.user_id == user_id).update(
+        {models.Order.user_id: None}
+    )
+    db.query(models.Review).filter(models.Review.user_id == user_id).update(
+        {models.Review.user_id: None}
+    )
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/login", response_model=schemas.TokenResponse)

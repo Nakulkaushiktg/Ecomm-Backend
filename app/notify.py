@@ -382,6 +382,30 @@ def _worker(text: str, order):
         print("[notify] send failed:", e)
 
 
+def notify_password_reset(user):
+    """Tell the store owner a customer wants their password reset."""
+    if not _email_enabled():
+        return
+    to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
+    html = (
+        '<div style="font-family:Arial,sans-serif;color:#2b231e;">'
+        '<h2 style="color:#7B2D26;">Password reset requested</h2>'
+        f'<p><b>{user.name}</b> ({user.email}'
+        + (f', {user.phone}' if user.phone else '')
+        + ') forgot their password and asked for help.</p>'
+        '<p>Open the admin panel &rarr; Customers &rarr; Reset Password, '
+        'then share the new password with them.</p></div>'
+    )
+    text = (
+        f"{user.name} ({user.email}) requested a password reset. "
+        "Reset it from Admin > Customers and share the new password."
+    )
+    try:
+        _deliver(to_addr, "Password reset request — Kirti Thread Art", html=html, text=text)
+    except Exception as e:
+        print("[notify] reset request email failed:", e)
+
+
 def notify_owner_order(order):
     """Fire-and-forget notification to the owner about a new order."""
     if (settings.NOTIFY_PROVIDER or "none").lower() == "none":

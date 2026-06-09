@@ -7,6 +7,7 @@ from ..database import get_db
 from ..auth import (
     hash_password, verify_password, create_access_token, require_user,
 )
+from ..notify import notify_password_reset
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -47,6 +48,22 @@ def login(payload: schemas.UserLogin, db: Session = Depends(get_db)):
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(401, "Invalid email or password")
     return _auth_response(user)
+
+
+@router.post("/forgot")
+def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Customer forgot password: flag the account and notify the store owner.
+    Always returns ok (don't reveal which emails are registered)."""
+    email = payload.email.strip().lower()
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if user:
+        user.reset_requested = True
+        db.commit()
+        try:
+            notify_password_reset(user)
+        except Exception as e:
+            print("[forgot] notify failed:", e)
+    return {"ok": True}
 
 
 @router.get("/me", response_model=schemas.UserOut)

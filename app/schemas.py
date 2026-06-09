@@ -294,6 +294,10 @@ class UserLogin(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
 class UserProfileUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
@@ -331,6 +335,7 @@ class AdminCustomerOut(BaseModel):
     city: str = ""
     state: str = ""
     pincode: str = ""
+    reset_requested: bool = False
     created_at: datetime
     order_count: int = 0
 
