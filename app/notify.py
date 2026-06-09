@@ -20,6 +20,62 @@ from email.mime.text import MIMEText
 from .config import settings
 
 
+def _email_enabled() -> bool:
+    """True if either Resend or Gmail SMTP credentials are configured."""
+    return bool(settings.RESEND_API_KEY) or bool(settings.EMAIL and settings.EMAIL_PASSWORD)
+
+
+def _send_via_resend(to_addr, subject, html="", text="", reply_to=""):
+    payload = {
+        "from": settings.RESEND_FROM,
+        "to": [to_addr],
+        "subject": subject,
+    }
+    if html:
+        payload["html"] = html
+    if text:
+        payload["text"] = text
+    if reply_to:
+        payload["reply_to"] = reply_to
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=data,
+        headers={
+            "Authorization": "Bearer %s" % settings.RESEND_API_KEY,
+            "Content-Type": "application/json",
+        },
+    )
+    urllib.request.urlopen(req, timeout=20).read()
+
+
+def _send_via_smtp(to_addr, subject, html="", text="", reply_to=""):
+    sender = settings.EMAIL
+    password = (settings.EMAIL_PASSWORD or "").replace(" ", "")  # Gmail app password
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = "Divya Handmade <%s>" % sender
+    msg["To"] = to_addr
+    if reply_to:
+        msg["Reply-To"] = reply_to
+    if text:
+        msg.attach(MIMEText(text, "plain"))
+    if html:
+        msg.attach(MIMEText(html, "html"))
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
+        s.starttls()
+        s.login(sender, password)
+        s.send_message(msg)
+
+
+def _deliver(to_addr, subject, html="", text="", reply_to=""):
+    """Send one email. Prefers Resend HTTP API (Render-safe); falls back to Gmail SMTP."""
+    if settings.RESEND_API_KEY:
+        _send_via_resend(to_addr, subject, html, text, reply_to)
+    else:
+        _send_via_smtp(to_addr, subject, html, text, reply_to)
+
+
 def _build_html(order) -> str:
     rows = "".join(
         """
@@ -262,11 +318,9 @@ def _build_customer_html(order) -> str:
 
 def send_contact_email(name: str, email: str, phone: str, message: str) -> None:
     """Send a Contact Us enquiry to the store owner. Raises on failure."""
-    sender = settings.EMAIL
-    password = (settings.EMAIL_PASSWORD or "").replace(" ", "")
-    if not sender or not password:
+    if not _email_enabled():
         raise ValueError("Store email is not configured")
-    to_addr = settings.NOTIFY_EMAIL_TO or sender
+    to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
     safe_msg = (message or "").replace("\n", "<br>")
     html = """
 <div style="background:#f5f1e8;padding:24px 0;font-family:Arial,Helvetica,sans-serif;color:#2b231e;">
@@ -286,65 +340,39 @@ def send_contact_email(name: str, email: str, phone: str, message: str) -> None:
   </div>
 </div>""".format(name=name, email=email or "-", phone=phone or "-", message=safe_msg)
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Contact Enquiry from %s" % name
-    msg["From"] = "Divya Handmade <%s>" % sender
-    msg["To"] = to_addr
-    if email:
-        msg["Reply-To"] = email
-    msg.attach(MIMEText("From %s (%s, %s):\n\n%s" % (name, email, phone, message), "plain"))
-    msg.attach(MIMEText(html, "html"))
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
-        s.starttls()
-        s.login(sender, password)
-        s.send_message(msg)
+    text = "From %s (%s, %s):\n\n%s" % (name, email, phone, message)
+    _deliver(to_addr, "Contact Enquiry from %s" % name, html=html, text=text, reply_to=email or "")
 
 
 def send_customer_email(order) -> None:
     """Send a branded confirmation email to the customer. Raises on failure."""
     if not order.email:
         raise ValueError("Customer has no email address")
-    sender = settings.EMAIL
-    password = (settings.EMAIL_PASSWORD or "").replace(" ", "")
-    if not sender or not password:
+    if not _email_enabled():
         raise ValueError("Store email is not configured")
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Your Divya Handmade Order #%s" % order.id
-    msg["From"] = "Divya Handmade <%s>" % sender
-    msg["To"] = order.email
     plain = "Thank you for your order #%s with Divya Handmade. Total: Rs.%.0f." % (
         order.id, order.total
     )
-    msg.attach(MIMEText(plain, "plain"))
-    msg.attach(MIMEText(_build_customer_html(order), "html"))
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
-        s.starttls()
-        s.login(sender, password)
-        s.send_message(msg)
+    _deliver(
+        order.email,
+        "Your Divya Handmade Order #%s" % order.id,
+        html=_build_customer_html(order),
+        text=plain,
+    )
 
 
 def _send_email(text: str, order):
-    sender = settings.EMAIL
-    password = (settings.EMAIL_PASSWORD or "").replace(" ", "")  # Gmail app password
-    to_addr = settings.NOTIFY_EMAIL_TO or sender
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "New Order #%s - Rs.%.0f (%s)" % (
+    to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
+    subject = "New Order #%s - Rs.%.0f (%s)" % (
         order.id, order.total, order.customer_name
     )
-    msg["From"] = "Divya Handmade <%s>" % sender
-    msg["To"] = to_addr
-    msg.attach(MIMEText(text, "plain"))            # fallback
-    msg.attach(MIMEText(_build_html(order), "html"))  # nice version
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
-        s.starttls()
-        s.login(sender, password)
-        s.send_message(msg)
+    _deliver(to_addr, subject, html=_build_html(order), text=text)
 
 
 def _worker(text: str, order):
     provider = (settings.NOTIFY_PROVIDER or "none").lower()
     try:
-        if provider == "email" and settings.EMAIL and settings.EMAIL_PASSWORD:
+        if provider == "email" and _email_enabled():
             _send_email(text, order)
         elif provider == "callmebot" and settings.CALLMEBOT_APIKEY:
             _send_callmebot(text)
@@ -371,17 +399,9 @@ def _low_stock_worker(items):
     text = "\n".join(lines)
     provider = (settings.NOTIFY_PROVIDER or "none").lower()
     try:
-        if provider == "email" and settings.EMAIL and settings.EMAIL_PASSWORD:
-            sender = settings.EMAIL
-            password = settings.EMAIL_PASSWORD.replace(" ", "")
-            msg = MIMEText(text)
-            msg["Subject"] = "Low Stock Alert - Divya Handmade"
-            msg["From"] = "Divya Handmade <%s>" % sender
-            msg["To"] = settings.NOTIFY_EMAIL_TO or sender
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
-                s.starttls()
-                s.login(sender, password)
-                s.send_message(msg)
+        if provider == "email" and _email_enabled():
+            to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
+            _deliver(to_addr, "Low Stock Alert - Divya Handmade", text=text)
         elif provider == "greenapi" and settings.GREENAPI_INSTANCE and settings.GREENAPI_TOKEN:
             _send_greenapi(text)
         elif provider == "callmebot" and settings.CALLMEBOT_APIKEY:

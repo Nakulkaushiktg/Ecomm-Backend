@@ -15,10 +15,13 @@ class Settings(BaseSettings):
 
     # ---- Order notification to owner ----
     NOTIFY_PROVIDER: str = "none"      # none | email | greenapi | callmebot
-    # email (Gmail)
+    # email (Gmail SMTP — used for local dev; Render free blocks outbound SMTP)
     EMAIL: str = ""                    # your gmail address (sender + receiver)
     EMAIL_PASSWORD: str = ""           # gmail App Password
     NOTIFY_EMAIL_TO: str = ""          # where to receive (blank = same as EMAIL)
+    # Resend HTTP API (works on Render where SMTP is blocked). If set, used over SMTP.
+    RESEND_API_KEY: str = ""
+    RESEND_FROM: str = "Divya Handmade <onboarding@resend.dev>"
     # whatsapp providers
     CALLMEBOT_APIKEY: str = ""
     GREENAPI_INSTANCE: str = ""
