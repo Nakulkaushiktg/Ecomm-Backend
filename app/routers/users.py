@@ -56,13 +56,14 @@ def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depend
     Always returns ok (don't reveal which emails are registered)."""
     email = payload.email.strip().lower()
     user = db.query(models.User).filter(models.User.email == email).first()
-    if user:
-        user.reset_requested = True
-        db.commit()
-        try:
-            notify_password_reset(user)
-        except Exception as e:
-            print("[forgot] notify failed:", e)
+    if not user:
+        raise HTTPException(404, "No account found with this email. Please check or sign up.")
+    user.reset_requested = True
+    db.commit()
+    try:
+        notify_password_reset(user)
+    except Exception as e:
+        print("[forgot] notify failed:", e)
     return {"ok": True}
 
 
@@ -96,3 +97,50 @@ def my_orders(
         .order_by(models.Order.created_at.desc())
         .all()
     )
+
+
+# ---------- Wishlist (per customer) ----------
+@router.get("/wishlist", response_model=List[int])
+def get_wishlist(db: Session = Depends(get_db), user: models.User = Depends(require_user)):
+    rows = (
+        db.query(models.WishlistItem.product_id)
+        .filter(models.WishlistItem.user_id == user.id)
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+@router.post("/wishlist/{product_id}")
+def add_wishlist(
+    product_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(require_user),
+):
+    if not db.query(models.Product.id).filter(models.Product.id == product_id).first():
+        raise HTTPException(404, "Product not found")
+    exists = (
+        db.query(models.WishlistItem)
+        .filter(
+            models.WishlistItem.user_id == user.id,
+            models.WishlistItem.product_id == product_id,
+        )
+        .first()
+    )
+    if not exists:
+        db.add(models.WishlistItem(user_id=user.id, product_id=product_id))
+        db.commit()
+    return {"ok": True}
+
+
+@router.delete("/wishlist/{product_id}")
+def remove_wishlist(
+    product_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(require_user),
+):
+    db.query(models.WishlistItem).filter(
+        models.WishlistItem.user_id == user.id,
+        models.WishlistItem.product_id == product_id,
+    ).delete()
+    db.commit()
+    return {"ok": True}

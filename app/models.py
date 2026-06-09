@@ -68,6 +68,16 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class WishlistItem(Base):
+    """A product saved to a customer's wishlist."""
+    __tablename__ = "wishlist_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Order(Base):
     __tablename__ = "orders"
 
