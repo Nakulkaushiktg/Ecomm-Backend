@@ -29,7 +29,7 @@ def create_order(amount_rupees: float, receipt: str = "") -> dict:
         "amount": int(round(amount_rupees * 100)),  # paise
         "currency": "INR",
         "payment_capture": 1,
-        "receipt": receipt or "divya_order",
+        "receipt": receipt or "kirti_order",
     }).encode()
     req = urllib.request.Request(
         f"{API_BASE}/orders",

@@ -11,7 +11,7 @@ from .routers import products, orders, admin, upload, categories
 # create tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Handmade Divine Store API")
+app = FastAPI(title="Kirti Thread Art API")
 
 # allow the configured frontend, localhost, and any *.vercel.app preview/prod
 _origins = [settings.FRONTEND_ORIGIN, "http://localhost:5173", "http://127.0.0.1:5173"]

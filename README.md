@@ -1,6 +1,6 @@
-# Divya Handmade — Backend API
+# kirti thread art — Backend API
 
-FastAPI + SQLAlchemy backend for the Divya Handmade store. Serves both the
+FastAPI + SQLAlchemy backend for the kirti thread art store. Serves both the
 storefront and the admin panel.
 
 ## Local development

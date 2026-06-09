@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     NOTIFY_EMAIL_TO: str = ""          # where to receive (blank = same as EMAIL)
     # Resend HTTP API (works on Render where SMTP is blocked). If set, used over SMTP.
     RESEND_API_KEY: str = ""
-    RESEND_FROM: str = "kirti thread art <onboarding@resend.dev>"
+    RESEND_FROM: str = "Kirti Thread Art <onboarding@resend.dev>"
     # whatsapp providers
     CALLMEBOT_APIKEY: str = ""
     GREENAPI_INSTANCE: str = ""

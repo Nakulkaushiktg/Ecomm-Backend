@@ -54,7 +54,7 @@ def _send_via_smtp(to_addr, subject, html="", text="", reply_to=""):
     password = (settings.EMAIL_PASSWORD or "").replace(" ", "")  # Gmail app password
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = "Divya Handmade <%s>" % sender
+    msg["From"] = "Kirti Thread Art <%s>" % sender
     msg["To"] = to_addr
     if reply_to:
         msg["Reply-To"] = reply_to
@@ -112,7 +112,7 @@ def _build_html(order) -> str:
 <div style="background:#f5f1e8;padding:24px 0;font-family:Arial,Helvetica,sans-serif;color:#2b231e;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.08);">
     <div style="background:#7B2D26;padding:22px 28px;color:#fff;">
-      <div style="font-size:13px;letter-spacing:2px;color:#E8C77E;">DIVYA HANDMADE</div>
+      <div style="font-size:13px;letter-spacing:2px;color:#E8C77E;">Kirti Thread Art</div>
       <div style="font-size:22px;font-weight:bold;margin-top:4px;">New Order Received &#127881;</div>
     </div>
 
@@ -161,7 +161,7 @@ def _build_html(order) -> str:
       </p>
     </div>
     <div style="background:#f3e9d7;padding:14px;text-align:center;font-size:12px;color:#7B2D26;">
-      Divya Handmade &middot; Woolen &middot; Sacred &middot; Crafted
+      Kirti Thread Art &middot; Woolen &middot; Sacred &middot; Crafted
     </div>
   </div>
 </div>""".format(
@@ -272,7 +272,7 @@ def _build_customer_html(order) -> str:
 <div style="background:#f5f1e8;padding:24px 0;font-family:Arial,Helvetica,sans-serif;color:#2b231e;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.08);">
     <div style="background:#7B2D26;padding:26px 28px;color:#fff;text-align:center;">
-      <div style="font-size:13px;letter-spacing:3px;color:#E8C77E;">DIVYA HANDMADE</div>
+      <div style="font-size:13px;letter-spacing:3px;color:#E8C77E;">Kirti Thread Art</div>
       <div style="font-size:24px;font-weight:bold;margin-top:6px;">Thank You, {cname}! &#128153;</div>
     </div>
     <div style="padding:24px 28px;">
@@ -304,10 +304,10 @@ def _build_customer_html(order) -> str:
       <p style="margin-top:20px;font-size:14px;line-height:1.6;color:#555;">
         If you have any questions, just reply to this email — we're always happy to help.
       </p>
-      <p style="font-size:14px;">With gratitude,<br><b>Team Divya Handmade</b> &#129528;&#128367;</p>
+      <p style="font-size:14px;">With gratitude,<br><b>Team Kirti Thread Art</b> &#129528;&#128367;</p>
     </div>
     <div style="background:#f3e9d7;padding:14px;text-align:center;font-size:12px;color:#7B2D26;">
-      Divya Handmade &middot; Woolen &middot; Sacred &middot; Crafted
+      Kirti Thread Art &middot; Woolen &middot; Sacred &middot; Crafted
     </div>
   </div>
 </div>""".format(
@@ -326,7 +326,7 @@ def send_contact_email(name: str, email: str, phone: str, message: str) -> None:
 <div style="background:#f5f1e8;padding:24px 0;font-family:Arial,Helvetica,sans-serif;color:#2b231e;">
   <div style="max-width:540px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.08);">
     <div style="background:#7B2D26;padding:20px 26px;color:#fff;">
-      <div style="font-size:12px;letter-spacing:2px;color:#E8C77E;">DIVYA HANDMADE</div>
+      <div style="font-size:12px;letter-spacing:2px;color:#E8C77E;">Kirti Thread Art</div>
       <div style="font-size:20px;font-weight:bold;margin-top:4px;">New Contact Enquiry &#9993;</div>
     </div>
     <div style="padding:22px 26px;font-size:14px;line-height:1.6;">
@@ -350,12 +350,12 @@ def send_customer_email(order) -> None:
         raise ValueError("Customer has no email address")
     if not _email_enabled():
         raise ValueError("Store email is not configured")
-    plain = "Thank you for your order #%s with Divya Handmade. Total: Rs.%.0f." % (
+    plain = "Thank you for your order #%s with Kirti Thread Art. Total: Rs.%.0f." % (
         order.id, order.total
     )
     _deliver(
         order.email,
-        "Your Divya Handmade Order #%s" % order.id,
+        "Your Kirti Thread Art Order #%s" % order.id,
         html=_build_customer_html(order),
         text=plain,
     )
@@ -401,7 +401,7 @@ def _low_stock_worker(items):
     try:
         if provider == "email" and _email_enabled():
             to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
-            _deliver(to_addr, "Low Stock Alert - Divya Handmade", text=text)
+            _deliver(to_addr, "Low Stock Alert - Kirti Thread Art", text=text)
         elif provider == "greenapi" and settings.GREENAPI_INSTANCE and settings.GREENAPI_TOKEN:
             _send_greenapi(text)
         elif provider == "callmebot" and settings.CALLMEBOT_APIKEY:

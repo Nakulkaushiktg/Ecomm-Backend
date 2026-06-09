@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: divya-handmade-api
+    name: kirti-thread-art-api
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
@@ -23,7 +23,7 @@ services:
       - key: UPI_PAYEE_NAME
         sync: false
       - key: FRONTEND_ORIGIN
-        sync: false      # your Vercel URL, e.g. https://divya-handmade.vercel.app
+        sync: false      # your Vercel URL, e.g. https://kirti-thread-art.vercel.app
       - key: NOTIFY_PROVIDER
         value: email
       - key: EMAIL
