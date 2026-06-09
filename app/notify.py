@@ -45,6 +45,11 @@ def _send_via_resend(to_addr, subject, html="", text="", reply_to=""):
         headers={
             "Authorization": "Bearer %s" % settings.RESEND_API_KEY,
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            # Cloudflare in front of api.resend.com blocks the default
+            # "Python-urllib" agent (error 1010); use a browser-like UA.
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         },
     )
     try:
