@@ -12,6 +12,7 @@ Sending runs in a background thread so it never slows/breaks the order.
 import json
 import smtplib
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from email.mime.multipart import MIMEMultipart
@@ -46,7 +47,15 @@ def _send_via_resend(to_addr, subject, html="", text="", reply_to=""):
             "Content-Type": "application/json",
         },
     )
-    urllib.request.urlopen(req, timeout=20).read()
+    try:
+        urllib.request.urlopen(req, timeout=20).read()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        # surface Resend's real message (which 'to'/account is allowed) + sender used
+        raise RuntimeError(
+            "Resend %s sending to %s as '%s': %s"
+            % (e.code, to_addr, settings.RESEND_FROM, body)
+        )
 
 
 def _send_via_smtp(to_addr, subject, html="", text="", reply_to=""):
