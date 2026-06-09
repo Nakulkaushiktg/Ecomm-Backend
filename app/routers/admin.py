@@ -69,6 +69,8 @@ def delete_customer(
     db.query(models.Review).filter(models.Review.user_id == user_id).update(
         {models.Review.user_id: None}
     )
+    # wishlist items belong to the account — remove them
+    db.query(models.WishlistItem).filter(models.WishlistItem.user_id == user_id).delete()
     db.delete(user)
     db.commit()
     return {"ok": True}
