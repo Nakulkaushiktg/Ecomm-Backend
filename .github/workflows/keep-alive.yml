@@ -1,0 +1,23 @@
+# Keeps the free Render web service awake by pinging its health endpoint.
+# Render's free tier spins the app down after ~15 min of inactivity, and a cold
+# start then takes 30-40s. Pinging every 14 min keeps it under that window, so
+# real users never hit the cold start. The ping is best-effort: a failed request
+# never fails the workflow.
+# NOTE: cron times below are in UTC (GitHub Actions always uses UTC).
+name: Keep Render app awake
+
+on:
+  schedule:
+    - cron: "*/14 * * * *"   # every 14 minutes (UTC)
+  workflow_dispatch:          # allow manual runs from the GitHub Actions UI
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          curl --silent --show-error --location \
+               --max-time 40 --retry 2 \
+               https://ecomm-backend-rxxp.onrender.com/api/health \
+            || echo "Ping failed, ignoring so the workflow stays green."
