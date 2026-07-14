@@ -29,6 +29,8 @@ class Product(Base):
     is_active = Column(Boolean, default=True)
     is_featured = Column(Boolean, default=False)
     is_bestseller = Column(Boolean, default=False)
+    is_new = Column(Boolean, default=False)
+    is_trending = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     variants = relationship(

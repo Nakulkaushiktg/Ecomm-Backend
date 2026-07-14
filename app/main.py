@@ -4,12 +4,32 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import text
+
 from .config import settings
 from .database import Base, engine
 from .routers import products, orders, admin, upload, categories, users
 
 # create tables
 Base.metadata.create_all(bind=engine)
+
+
+def _run_migrations():
+    """Add new columns to existing tables (create_all won't alter them).
+    Idempotent — safe to run on every startup (Postgres)."""
+    stmts = [
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_trending BOOLEAN DEFAULT FALSE",
+    ]
+    with engine.begin() as conn:
+        for s in stmts:
+            try:
+                conn.execute(text(s))
+            except Exception as e:  # pragma: no cover
+                print("[migrate] skip:", e)
+
+
+_run_migrations()
 
 app = FastAPI(title="Kirti Thread Art API")
 

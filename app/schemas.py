@@ -35,6 +35,8 @@ class ProductBase(BaseModel):
     is_active: bool = True
     is_featured: bool = False
     is_bestseller: bool = False
+    is_new: bool = False
+    is_trending: bool = False
 
 
 class ProductCreate(ProductBase):
@@ -57,6 +59,8 @@ class ProductUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_featured: Optional[bool] = None
     is_bestseller: Optional[bool] = None
+    is_new: Optional[bool] = None
+    is_trending: Optional[bool] = None
     variants: Optional[List[VariantIn]] = None
 
 
