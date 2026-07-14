@@ -190,7 +190,20 @@ def delete_product(
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
-    db.delete(product)
+
+    # clean up references that would otherwise block the delete (FK constraints)
+    db.query(models.Review).filter(models.Review.product_id == product_id).delete(
+        synchronize_session=False
+    )
+    db.query(models.WishlistItem).filter(models.WishlistItem.product_id == product_id).delete(
+        synchronize_session=False
+    )
+    # keep past orders intact — just unlink the (now deleted) product
+    db.query(models.OrderItem).filter(models.OrderItem.product_id == product_id).update(
+        {models.OrderItem.product_id: None}, synchronize_session=False
+    )
+
+    db.delete(product)  # variants cascade automatically
     db.commit()
     return {"ok": True}
 
