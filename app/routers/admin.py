@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,29 @@ from ..notify import send_customer_email
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+@router.get("/stats")
+def admin_stats(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """Dashboard overview numbers for the admin home."""
+    orders = db.query(models.Order).all()
+    products = db.query(models.Product).all()
+    earned = {"paid", "shipped", "delivered"}
+    today = datetime.utcnow().date()
+    today_orders = [o for o in orders if o.created_at and o.created_at.date() == today]
+    return {
+        "total_orders": len(orders),
+        "pending_orders": sum(1 for o in orders if o.status == "pending"),
+        "shipped_orders": sum(1 for o in orders if o.status == "shipped"),
+        "delivered_orders": sum(1 for o in orders if o.status == "delivered"),
+        "revenue": round(sum(o.total for o in orders if o.status in earned), 2),
+        "today_orders": len(today_orders),
+        "today_revenue": round(sum(o.total for o in today_orders if o.status in earned), 2),
+        "total_products": len(products),
+        "low_stock": sum(1 for p in products if 0 < p.stock <= 5),
+        "out_of_stock": sum(1 for p in products if p.stock <= 0),
+        "total_customers": db.query(models.User).count(),
+    }
 
 
 # ---------- Customers ----------
