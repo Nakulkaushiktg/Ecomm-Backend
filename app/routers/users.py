@@ -1,3 +1,5 @@
+import secrets
+from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +9,7 @@ from ..database import get_db
 from ..auth import (
     hash_password, verify_password, create_access_token, require_user,
 )
-from ..notify import notify_password_reset
+from ..notify import send_reset_otp
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -52,18 +54,46 @@ def login(payload: schemas.UserLogin, db: Session = Depends(get_db)):
 
 @router.post("/forgot")
 def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Customer forgot password: flag the account and notify the store owner.
-    Always returns ok (don't reveal which emails are registered)."""
+    """Customer forgot password: generate a 6-digit OTP, store it hashed with a
+    10-minute expiry, and email it to the customer."""
     email = payload.email.strip().lower()
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
         raise HTTPException(404, "No account found with this email. Please check or sign up.")
+
+    otp = "%06d" % secrets.randbelow(1_000_000)
+    user.reset_otp = hash_password(otp)
+    user.reset_otp_expiry = datetime.utcnow() + timedelta(minutes=10)
     user.reset_requested = True
     db.commit()
+
     try:
-        notify_password_reset(user)
+        send_reset_otp(user.email, otp, user.name)
     except Exception as e:
-        print("[forgot] notify failed:", e)
+        print("[forgot] otp email failed:", e)
+        raise HTTPException(502, "Could not send the reset code right now. Please try again shortly.")
+    return {"ok": True}
+
+
+@router.post("/reset")
+def reset_password(payload: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Verify the emailed OTP and set a new password."""
+    email = payload.email.strip().lower()
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user or not user.reset_otp or not user.reset_otp_expiry:
+        raise HTTPException(400, "No reset request found. Please request a new code.")
+    if datetime.utcnow() > user.reset_otp_expiry:
+        raise HTTPException(400, "This code has expired. Please request a new one.")
+    if not verify_password(payload.otp.strip(), user.reset_otp):
+        raise HTTPException(400, "Incorrect code. Please check and try again.")
+    if len(payload.new_password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+
+    user.password_hash = hash_password(payload.new_password)
+    user.reset_otp = ""
+    user.reset_otp_expiry = None
+    user.reset_requested = False
+    db.commit()
     return {"ok": True}
 
 

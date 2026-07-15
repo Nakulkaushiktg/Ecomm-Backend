@@ -22,8 +22,44 @@ from .config import settings
 
 
 def _email_enabled() -> bool:
-    """True if either Resend or Gmail SMTP credentials are configured."""
-    return bool(settings.RESEND_API_KEY) or bool(settings.EMAIL and settings.EMAIL_PASSWORD)
+    """True if Brevo, Resend or Gmail SMTP credentials are configured."""
+    return (
+        bool(settings.BREVO_API_KEY and settings.BREVO_SENDER)
+        or bool(settings.RESEND_API_KEY)
+        or bool(settings.EMAIL and settings.EMAIL_PASSWORD)
+    )
+
+
+def _send_via_brevo(to_addr, subject, html="", text="", reply_to=""):
+    payload = {
+        "sender": {"name": settings.BREVO_SENDER_NAME, "email": settings.BREVO_SENDER},
+        "to": [{"email": to_addr}],
+        "subject": subject,
+    }
+    if html:
+        payload["htmlContent"] = html
+    if text:
+        payload["textContent"] = text
+    if reply_to:
+        payload["replyTo"] = {"email": reply_to}
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=data,
+        headers={
+            "api-key": settings.BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        urllib.request.urlopen(req, timeout=20).read()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        raise RuntimeError(
+            "Brevo %s sending to %s as '%s': %s"
+            % (e.code, to_addr, settings.BREVO_SENDER, body)
+        )
 
 
 def _send_via_resend(to_addr, subject, html="", text="", reply_to=""):
@@ -83,8 +119,11 @@ def _send_via_smtp(to_addr, subject, html="", text="", reply_to=""):
 
 
 def _deliver(to_addr, subject, html="", text="", reply_to=""):
-    """Send one email. Prefers Resend HTTP API (Render-safe); falls back to Gmail SMTP."""
-    if settings.RESEND_API_KEY:
+    """Send one email. Prefers Brevo, then Resend (both Render-safe HTTP APIs),
+    finally Gmail SMTP (local dev only)."""
+    if settings.BREVO_API_KEY and settings.BREVO_SENDER:
+        _send_via_brevo(to_addr, subject, html, text, reply_to)
+    elif settings.RESEND_API_KEY:
         _send_via_resend(to_addr, subject, html, text, reply_to)
     else:
         _send_via_smtp(to_addr, subject, html, text, reply_to)
@@ -356,6 +395,26 @@ def send_contact_email(name: str, email: str, phone: str, message: str) -> None:
 
     text = "From %s (%s, %s):\n\n%s" % (name, email, phone, message)
     _deliver(to_addr, "Contact Enquiry from %s" % name, html=html, text=text, reply_to=email or "")
+
+
+def send_reset_otp(to_email: str, otp: str, name: str = "") -> None:
+    """Email a password-reset one-time code to the customer. Raises on failure."""
+    if not _email_enabled():
+        raise ValueError("Store email is not configured")
+    hi = ("Hi %s," % name) if name else "Hi,"
+    html = """
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;
+      border:1px solid #eee;border-radius:12px;">
+      <h2 style="color:#7B2D26;margin:0 0 8px;">Password Reset</h2>
+      <p style="color:#444;">%s</p>
+      <p style="color:#444;">Use this code to reset your Kirti Thread Art password:</p>
+      <p style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#7B2D26;
+        text-align:center;margin:18px 0;">%s</p>
+      <p style="color:#888;font-size:13px;">This code expires in 10 minutes. If you didn't
+      request this, you can safely ignore this email.</p>
+    </div>""" % (hi, otp)
+    text = "Your Kirti Thread Art password reset code is %s. It expires in 10 minutes." % otp
+    _deliver(to_email, "Your password reset code: %s" % otp, html=html, text=text)
 
 
 def send_customer_email(order) -> None:

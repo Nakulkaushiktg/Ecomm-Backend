@@ -13,7 +13,7 @@ from ..auth import optional_user
 from ..config import settings
 from ..store import get_settings
 from ..utils import build_whatsapp_url, calc_shipping, calc_cod_fee, apply_coupon
-from ..notify import notify_owner_order, send_contact_email
+from ..notify import notify_owner_order, send_contact_email, send_customer_email
 from .. import models, schemas, razorpay_client
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -215,6 +215,11 @@ def create_order(
 
     # automatic notification to owner (if a provider is configured)
     notify_owner_order(order)
+    # confirmation email to the customer — never let a mail failure break the order
+    try:
+        send_customer_email(order)
+    except Exception as e:
+        print("[order] customer email failed:", e)
     if low_stock_alerts:
         from ..notify import notify_low_stock
         notify_low_stock(low_stock_alerts)

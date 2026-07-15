@@ -67,6 +67,8 @@ class User(Base):
     state = Column(String(100), default="")
     pincode = Column(String(15), default="")
     reset_requested = Column(Boolean, default=False)  # customer asked admin to reset
+    reset_otp = Column(String(200), default="")        # hashed one-time reset code
+    reset_otp_expiry = Column(DateTime, nullable=True)  # code valid until this time
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

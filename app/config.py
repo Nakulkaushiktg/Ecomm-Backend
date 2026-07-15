@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # Resend HTTP API (works on Render where SMTP is blocked). If set, used over SMTP.
     RESEND_API_KEY: str = ""
     RESEND_FROM: str = "Kirti Thread Art <onboarding@resend.dev>"
+    # Brevo HTTP API (free 300/day, works on Render, no domain needed — verify a
+    # single Gmail sender). Preferred over Resend/SMTP when set.
+    BREVO_API_KEY: str = ""
+    BREVO_SENDER: str = ""              # your verified sender email (e.g. your gmail)
+    BREVO_SENDER_NAME: str = "Kirti Thread Art"
     # whatsapp providers
     CALLMEBOT_APIKEY: str = ""
     GREENAPI_INSTANCE: str = ""

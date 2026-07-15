@@ -20,6 +20,8 @@ def _run_migrations():
     stmts = [
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new BOOLEAN DEFAULT FALSE",
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_trending BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp VARCHAR(200) DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp_expiry TIMESTAMP",
     ]
     with engine.begin() as conn:
         for s in stmts:

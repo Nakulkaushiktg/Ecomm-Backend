@@ -302,6 +302,12 @@ class ForgotPasswordRequest(BaseModel):
     email: str
 
 
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
+
 class UserProfileUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
