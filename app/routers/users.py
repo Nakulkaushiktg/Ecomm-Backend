@@ -1,8 +1,9 @@
 import secrets
+import time
 from datetime import datetime, timedelta
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -13,6 +14,20 @@ from ..notify import send_reset_otp
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# simple in-memory rate limiter (per IP + action) to slow brute-force attempts
+_rate_hits: dict[str, list[float]] = {}
+
+
+def _rate_limit(request: Request, action: str, max_calls: int, window_sec: int):
+    ip = request.client.host if request.client else "unknown"
+    key = f"{action}:{ip}"
+    now = time.time()
+    hits = [t for t in _rate_hits.get(key, []) if now - t < window_sec]
+    if len(hits) >= max_calls:
+        raise HTTPException(429, "Too many attempts. Please wait a few minutes and try again.")
+    hits.append(now)
+    _rate_hits[key] = hits
 
 
 def _auth_response(user: models.User) -> schemas.AuthResponse:
@@ -44,7 +59,8 @@ def register(payload: schemas.UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=schemas.AuthResponse)
-def login(payload: schemas.UserLogin, db: Session = Depends(get_db)):
+def login(payload: schemas.UserLogin, request: Request, db: Session = Depends(get_db)):
+    _rate_limit(request, "login", max_calls=8, window_sec=300)
     email = payload.email.strip().lower()
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user or not verify_password(payload.password, user.password_hash):
@@ -53,9 +69,10 @@ def login(payload: schemas.UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/forgot")
-def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_password(payload: schemas.ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
     """Customer forgot password: generate a 6-digit OTP, store it hashed with a
     10-minute expiry, and email it to the customer."""
+    _rate_limit(request, "forgot", max_calls=4, window_sec=600)
     email = payload.email.strip().lower()
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
@@ -76,8 +93,9 @@ def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depend
 
 
 @router.post("/reset")
-def reset_password(payload: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(payload: schemas.ResetPasswordRequest, request: Request, db: Session = Depends(get_db)):
     """Verify the emailed OTP and set a new password."""
+    _rate_limit(request, "reset", max_calls=10, window_sec=600)
     email = payload.email.strip().lower()
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user or not user.reset_otp or not user.reset_otp_expiry:
