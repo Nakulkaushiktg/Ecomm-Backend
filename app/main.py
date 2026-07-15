@@ -61,4 +61,13 @@ app.include_router(users.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    # touch the DB so a single keep-alive ping also keeps Neon (free tier) awake,
+    # otherwise the first real query after idle is slow even when the app is warm
+    db_ok = True
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        db_ok = False
+        print("[health] db ping failed:", e)
+    return {"status": "ok", "db": db_ok}
