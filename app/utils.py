@@ -43,7 +43,7 @@ def build_whatsapp_url(order) -> str:
     """Pre-filled WhatsApp message to the owner with full order details."""
     lines = [
         "*NEW ORDER* \U0001f6cd️",
-        f"Order #{order.id}",
+        f"Order #{order.order_number or order.id}",
         "",
         f"*Customer:* {order.customer_name}",
         f"*Phone:* {order.phone}",

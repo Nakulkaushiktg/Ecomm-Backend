@@ -218,7 +218,7 @@ def _build_html(order) -> str:
     </div>
   </div>
 </div>""".format(
-        oid=order.id, cname=order.customer_name, phone=order.phone, addr=addr,
+        oid=(order.order_number or order.id), cname=order.customer_name, phone=order.phone, addr=addr,
         rows=rows, subtotal=order.subtotal, discount_row=discount_row,
         shipping=order.shipping_fee, cod_row=cod_row, total=order.total, pay=pay,
     )
@@ -226,7 +226,7 @@ def _build_html(order) -> str:
 
 def _build_text(order) -> str:
     lines = [
-        "🛍️ NEW ORDER #%s" % order.id,
+        "🛍️ NEW ORDER #%s" % (order.order_number or order.id),
         "",
         "Customer: %s" % order.customer_name,
         "Phone: %s" % order.phone,
@@ -364,7 +364,7 @@ def _build_customer_html(order) -> str:
     </div>
   </div>
 </div>""".format(
-        cname=order.customer_name, status_msg=status_msg, oid=order.id,
+        cname=order.customer_name, status_msg=status_msg, oid=(order.order_number or order.id),
         rows=rows, tot_rows=tot_rows, addr=addr, track_block=track_block,
     )
 
@@ -417,18 +417,91 @@ def send_reset_otp(to_email: str, otp: str, name: str = "") -> None:
     _deliver(to_email, "Your password reset code: %s" % otp, html=html, text=text)
 
 
+STORE_URL = "https://kirti-thread-art.vercel.app"
+
+
+def build_product_showcase(products, title: str = "Handpicked for You") -> str:
+    """A titled product strip for campaign emails (up to 3 products)."""
+    if not products:
+        return ""
+    cells = ""
+    for p in products[:3]:
+        img = (p.images[0] if p.images else STORE_URL + "/logo.png")
+        if not str(img).startswith("http"):
+            img = STORE_URL + img
+        fv = p.variants[0] if p.variants else None
+        price = fv.price if (fv and fv.price and fv.price > 0) else p.price
+        cells += (
+            '<td width="33%%" style="padding:6px;vertical-align:top;text-align:center;">'
+            '<a href="{s}/product/{slug}" style="text-decoration:none;color:#2B231E;">'
+            '<img src="{img}" width="160" height="150" '
+            'style="width:100%%;max-width:160px;height:150px;object-fit:cover;border-radius:12px;display:block;margin:0 auto;" />'
+            '<div style="font-size:13px;margin-top:8px;line-height:1.3;">{name}</div>'
+            '<div style="font-size:15px;font-weight:bold;color:#7B2D26;">&#8377;{price:.0f}</div>'
+            "</a></td>"
+        ).format(s=STORE_URL, slug=p.slug, img=img, name=p.name, price=price)
+    safe_title = (title or "Handpicked for You").replace("<", "").replace(">", "")
+    return (
+        '<div style="padding:8px 22px 24px;background:#ffffff;">'
+        '<div style="text-align:center;font-family:Georgia,serif;font-size:21px;color:#7B2D26;margin-bottom:14px;">'
+        + safe_title +
+        "</div>"
+        '<table width="100%" cellspacing="0" cellpadding="0"><tr>' + cells + "</tr></table></div>"
+    )
+
+
+def send_campaign_email(to_email: str, subject: str, message: str, showcase_html: str = "") -> None:
+    """Send a premium branded campaign email (hero image + message + product strip)."""
+    if not _email_enabled():
+        raise ValueError("Store email is not configured")
+    safe = (message or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    body = safe.replace("\n", "<br>")
+    s = STORE_URL
+    # explicit backgrounds + colors on every block keep it readable in dark mode
+    html = """
+    <div style="background:#F3E9D7;padding:24px 10px;margin:0;font-family:Arial,Helvetica,sans-serif;">
+      <div style="max-width:560px;margin:auto;background:#ffffff;border-radius:16px;overflow:hidden;
+        border:1px solid #EADFC9;box-shadow:0 16px 40px -20px rgba(91,33,28,0.35);">
+        <div style="height:4px;background:linear-gradient(90deg,#C39A4B,#E8C77E,#C39A4B);"></div>
+        <!-- header -->
+        <div style="background:#7B2D26;padding:26px 28px;text-align:center;">
+          <img src="%s/logo.png" width="56" height="56" alt="" style="border-radius:50%%;border:2px solid #E8C77E;background:#FBF6EC;" />
+          <div style="margin-top:10px;font-family:Georgia,serif;font-size:23px;font-weight:bold;color:#FBF6EC;">Kirti Thread Art</div>
+          <div style="margin-top:5px;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#E8C77E;">Woolen &middot; Sacred &middot; Crafted</div>
+        </div>
+        <!-- body -->
+        <div style="background:#ffffff;padding:30px 34px 6px;">
+          <div style="background:#ffffff;color:#2B231E;font-size:16px;line-height:1.8;">%s</div>
+          <div style="text-align:center;padding:26px 0 6px;">
+            <a href="%s" style="display:inline-block;background:#7B2D26;color:#ffffff;text-decoration:none;
+              font-size:15px;font-weight:bold;padding:14px 38px;border-radius:999px;">Shop the Collection &rarr;</a>
+          </div>
+        </div>
+        <!-- product showcase -->
+        <div style="background:#ffffff;">%s</div>
+        <!-- footer -->
+        <div style="background:#7B2D26;padding:20px 28px;color:#E8C77E;font-size:12px;text-align:center;line-height:1.7;">
+          <div style="color:#FBF6EC;">Handmade with devotion by Indian artisans 🧶</div>
+          <a href="%s" style="color:#E8C77E;text-decoration:none;">kirti-thread-art.vercel.app</a>
+        </div>
+      </div>
+    </div>""" % (s, body, s, showcase_html, s)
+    _deliver(to_email, subject, html=html, text=message)
+
+
 def send_customer_email(order) -> None:
     """Send a branded confirmation email to the customer. Raises on failure."""
     if not order.email:
         raise ValueError("Customer has no email address")
     if not _email_enabled():
         raise ValueError("Store email is not configured")
+    onum = order.order_number or order.id
     plain = "Thank you for your order #%s with Kirti Thread Art. Total: Rs.%.0f." % (
-        order.id, order.total
+        onum, order.total
     )
     _deliver(
         order.email,
-        "Your Kirti Thread Art Order #%s" % order.id,
+        "Your Kirti Thread Art Order #%s" % onum,
         html=_build_customer_html(order),
         text=plain,
     )
@@ -437,7 +510,7 @@ def send_customer_email(order) -> None:
 def _send_email(text: str, order):
     to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
     subject = "New Order #%s - Rs.%.0f (%s)" % (
-        order.id, order.total, order.customer_name
+        order.order_number or order.id, order.total, order.customer_name
     )
     _deliver(to_addr, subject, html=_build_html(order), text=text)
 

@@ -69,7 +69,7 @@ def list_reviews(slug: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Product not found")
     return (
         db.query(models.Review)
-        .filter(models.Review.product_id == p.id)
+        .filter(models.Review.product_id == p.id, models.Review.show_on_site == True)  # noqa: E712
         .order_by(models.Review.created_at.desc())
         .all()
     )

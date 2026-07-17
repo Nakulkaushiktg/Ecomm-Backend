@@ -22,6 +22,11 @@ def _run_migrations():
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_trending BOOLEAN DEFAULT FALSE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp VARCHAR(200) DEFAULT ''",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp_expiry TIMESTAMP",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS instagram_url VARCHAR(200) DEFAULT ''",
+        "ALTER TABLE reviews ADD COLUMN IF NOT EXISTS show_on_site BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS banner_start VARCHAR(40) DEFAULT ''",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS banner_end VARCHAR(40) DEFAULT ''",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number VARCHAR(20)",
     ]
     with engine.begin() as conn:
         for s in stmts:

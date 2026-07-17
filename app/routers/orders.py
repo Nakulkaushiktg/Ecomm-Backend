@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,6 +18,16 @@ from ..notify import notify_owner_order, send_contact_email, send_customer_email
 from .. import models, schemas, razorpay_client
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
+
+
+def _gen_order_number(db: Session) -> str:
+    """Random, non-guessable public order number, e.g. KTA-7F3K9Q2M."""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no ambiguous 0/O/1/I
+    for _ in range(12):
+        num = "KTA-" + "".join(secrets.choice(alphabet) for _ in range(8))
+        if not db.query(models.Order).filter(models.Order.order_number == num).first():
+            return num
+    return "KTA-" + secrets.token_hex(5).upper()
 
 
 def _match_variant(product, size, color):
@@ -141,6 +152,7 @@ def create_order(
     cod = calc_cod_fee(cfg, method)
 
     order = models.Order(
+        order_number=_gen_order_number(db),
         user_id=user.id if user else None,
         customer_name=payload.customer_name,
         phone=payload.phone,
@@ -326,8 +338,11 @@ def _track_summary(raw):
 
 @router.post("/track", response_model=schemas.OrderOut)
 def track_order(payload: schemas.TrackRequest, db: Session = Depends(get_db)):
-    """Public: customer looks up their order by id + phone."""
-    order = db.query(models.Order).filter(models.Order.id == payload.order_id).first()
+    """Public: customer looks up their order by order number (or legacy id) + phone."""
+    ref = (payload.order_id or "").strip()
+    order = db.query(models.Order).filter(models.Order.order_number == ref).first()
+    if not order and ref.isdigit():  # legacy orders had numeric ids
+        order = db.query(models.Order).filter(models.Order.id == int(ref)).first()
     phone_digits = "".join(filter(str.isdigit, payload.phone))
     if not order or phone_digits[-10:] not in "".join(filter(str.isdigit, order.phone)):
         raise HTTPException(404, "No order found with that ID and phone number")
@@ -356,6 +371,64 @@ def public_coupons(db: Session = Depends(get_db)):
     )
 
 
+@router.get("/banners", response_model=list[schemas.BannerOut])
+def public_banners(db: Session = Depends(get_db)):
+    """Active banners; the storefront picks the one whose time window is live."""
+    return (
+        db.query(models.Banner)
+        .filter(models.Banner.is_active == True)  # noqa: E712
+        .order_by(models.Banner.created_at.desc())
+        .all()
+    )
+
+
+@router.get("/testimonials")
+def testimonials(db: Session = Depends(get_db)):
+    """Recent 4-5 star reviews (with a comment) for the home page carousel."""
+    rows = (
+        db.query(models.Review)
+        .filter(
+            models.Review.rating >= 4,
+            models.Review.comment != "",
+            models.Review.show_on_site == True,  # noqa: E712
+        )
+        .order_by(models.Review.created_at.desc())
+        .limit(12)
+        .all()
+    )
+    out = []
+    for r in rows:
+        prod = db.query(models.Product).filter(models.Product.id == r.product_id).first()
+        out.append({
+            "name": r.name or "Happy Customer",
+            "rating": r.rating,
+            "comment": r.comment,
+            "product_name": prod.name if prod else "",
+            "image_url": r.image_url or "",
+        })
+    return out
+
+
+@router.post("/subscribe")
+def subscribe(payload: schemas.SubscribeRequest, db: Session = Depends(get_db)):
+    """Store a newsletter subscriber (ignores duplicates) and notify the owner."""
+    email = payload.email.strip().lower()
+    if "@" not in email or "." not in email:
+        raise HTTPException(400, "Please enter a valid email address")
+    exists = db.query(models.Subscriber).filter(models.Subscriber.email == email).first()
+    if not exists:
+        db.add(models.Subscriber(email=email))
+        db.commit()
+        try:
+            from ..notify import _deliver, _email_enabled
+            if _email_enabled():
+                to = settings.NOTIFY_EMAIL_TO or settings.EMAIL or settings.BREVO_SENDER
+                _deliver(to, "New newsletter subscriber", text="New subscriber: %s" % email)
+        except Exception as e:
+            print("[subscribe] notify failed:", e)
+    return {"ok": True}
+
+
 @router.get("/config", response_model=schemas.StoreConfig)
 def store_config(db: Session = Depends(get_db)):
     cfg = get_settings(db)
@@ -371,4 +444,7 @@ def store_config(db: Session = Depends(get_db)):
         razorpay_key_id=settings.RAZORPAY_KEY_ID,
         banner_active=cfg.banner_active,
         banner_text=cfg.banner_text,
+        banner_start=cfg.banner_start or "",
+        banner_end=cfg.banner_end or "",
+        instagram_url=cfg.instagram_url or "",
     )

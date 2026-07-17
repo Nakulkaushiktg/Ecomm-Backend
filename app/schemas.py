@@ -116,6 +116,7 @@ class OrderCreate(BaseModel):
 class OrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    order_number: Optional[str] = ""
     customer_name: str
     phone: str
     email: str
@@ -226,6 +227,7 @@ class ReviewCreate(BaseModel):
 class ReviewOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    show_on_site: bool = True
     name: str
     rating: int
     comment: str
@@ -243,6 +245,9 @@ class SettingsOut(BaseModel):
     admin_username: str = ""
     banner_active: bool = False
     banner_text: str = ""
+    banner_start: str = ""
+    banner_end: str = ""
+    instagram_url: str = ""
 
 
 class SettingsUpdate(BaseModel):
@@ -252,11 +257,14 @@ class SettingsUpdate(BaseModel):
     cod_fee: Optional[float] = None
     banner_active: Optional[bool] = None
     banner_text: Optional[str] = None
+    banner_start: Optional[str] = None
+    banner_end: Optional[str] = None
+    instagram_url: Optional[str] = None
 
 
 # ---------- Track order (public) ----------
 class TrackRequest(BaseModel):
-    order_id: int
+    order_id: str  # order number (KTA-xxxx) or legacy numeric id
     phone: str
 
 
@@ -306,6 +314,47 @@ class ResetPasswordRequest(BaseModel):
     email: str
     otp: str
     new_password: str
+
+
+class BannerBase(BaseModel):
+    text: str
+    start_at: str = ""
+    end_at: str = ""
+    is_active: bool = True
+
+
+class BannerCreate(BannerBase):
+    pass
+
+
+class BannerOut(BannerBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+
+
+class SubscribeRequest(BaseModel):
+    email: str
+
+
+class SubscriberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    email: str
+    created_at: datetime
+
+
+class AddSubscribersRequest(BaseModel):
+    emails: List[str]
+
+
+class SendMailRequest(BaseModel):
+    subject: str
+    message: str
+    to_all: bool = False
+    emails: Optional[List[str]] = None
+    include_products: bool = True
+    showcase_title: str = "Handpicked for You"
+    product_ids: Optional[List[int]] = None  # specific products; empty/None = auto-pick
 
 
 class UserProfileUpdate(BaseModel):
@@ -367,6 +416,9 @@ class StoreConfig(BaseModel):
     razorpay_key_id: str
     banner_active: bool = False
     banner_text: str = ""
+    banner_start: str = ""
+    banner_end: str = ""
+    instagram_url: str = ""
 
 
 class RazorpayCreateResponse(BaseModel):

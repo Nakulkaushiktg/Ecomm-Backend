@@ -86,6 +86,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
+    order_number = Column(String(20), unique=True, index=True)  # public, non-guessable
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     customer_name = Column(String(150), nullable=False)
     phone = Column(String(20), nullable=False)
@@ -144,6 +145,11 @@ class Setting(Base):
     # hero sale/offer banner (editable from admin)
     banner_active = Column(Boolean, default=False)
     banner_text = Column(String(240), default="")
+    # optional schedule (stored as "YYYY-MM-DDTHH:MM" wall-clock strings; blank = none)
+    banner_start = Column(String(40), default="")
+    banner_end = Column(String(40), default="")
+    # Instagram profile URL — if set, storefront shows a "Follow us" section
+    instagram_url = Column(String(200), default="")
 
 
 class Coupon(Base):
@@ -167,6 +173,29 @@ class Review(Base):
     rating = Column(Integer, default=5)  # 1..5
     comment = Column(Text, default="")
     image_url = Column(String(300), default="")  # optional review photo
+    show_on_site = Column(Boolean, default=True)  # admin can hide a review from the store
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Banner(Base):
+    """A scheduled announcement banner. Multiple can exist; the storefront shows
+    the one whose time window is currently active."""
+    __tablename__ = "banners"
+
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(String(240), nullable=False)
+    start_at = Column(String(40), default="")  # "YYYY-MM-DDTHH:MM" wall-clock, blank = always
+    end_at = Column(String(40), default="")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Subscriber(Base):
+    """Newsletter email subscriber."""
+    __tablename__ = "subscribers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(150), unique=True, index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

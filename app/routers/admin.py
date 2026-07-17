@@ -471,9 +471,141 @@ def delete_category(
 
 
 # ---------- Reviews moderation ----------
+@router.get("/banners", response_model=List[schemas.BannerOut])
+def admin_list_banners(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    return db.query(models.Banner).order_by(models.Banner.created_at.desc()).all()
+
+
+@router.post("/banners", response_model=schemas.BannerOut)
+def admin_create_banner(payload: schemas.BannerCreate, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    if not payload.text.strip():
+        raise HTTPException(400, "Banner text is required")
+    b = models.Banner(**payload.model_dump())
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return b
+
+
+@router.put("/banners/{banner_id}", response_model=schemas.BannerOut)
+def admin_update_banner(banner_id: int, payload: schemas.BannerCreate, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    b = db.query(models.Banner).filter(models.Banner.id == banner_id).first()
+    if not b:
+        raise HTTPException(404, "Banner not found")
+    for k, v in payload.model_dump().items():
+        setattr(b, k, v)
+    db.commit()
+    db.refresh(b)
+    return b
+
+
+@router.delete("/banners/{banner_id}")
+def admin_delete_banner(banner_id: int, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    b = db.query(models.Banner).filter(models.Banner.id == banner_id).first()
+    if b:
+        db.delete(b)
+        db.commit()
+    return {"ok": True}
+
+
+@router.get("/subscribers", response_model=List[schemas.SubscriberOut])
+def list_subscribers(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    return db.query(models.Subscriber).order_by(models.Subscriber.created_at.desc()).all()
+
+
+@router.post("/subscribers")
+def add_subscribers(payload: schemas.AddSubscribersRequest, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """Bulk-add subscribers (one email per line). Skips invalid & duplicates."""
+    added, skipped = 0, 0
+    for raw in payload.emails:
+        e = (raw or "").strip().lower()
+        if "@" not in e or "." not in e:
+            skipped += 1
+            continue
+        if db.query(models.Subscriber).filter(models.Subscriber.email == e).first():
+            skipped += 1
+            continue
+        db.add(models.Subscriber(email=e))
+        added += 1
+    db.commit()
+    return {"added": added, "skipped": skipped}
+
+
+@router.delete("/subscribers/{sub_id}")
+def delete_subscriber(sub_id: int, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    sub = db.query(models.Subscriber).filter(models.Subscriber.id == sub_id).first()
+    if sub:
+        db.delete(sub)
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/send-mail")
+def send_mail(payload: schemas.SendMailRequest, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """Send a branded email to all or selected subscribers."""
+    if not payload.subject.strip() or not payload.message.strip():
+        raise HTTPException(400, "Subject and message are required")
+    if payload.to_all:
+        emails = [s.email for s in db.query(models.Subscriber).all()]
+    else:
+        emails = [e.strip() for e in (payload.emails or []) if e.strip()]
+    if not emails:
+        raise HTTPException(400, "No recipients selected")
+
+    from ..notify import send_campaign_email, build_product_showcase
+    # build the product strip once
+    showcase = ""
+    if payload.include_products:
+        if payload.product_ids:
+            # admin picked specific products — keep their chosen order
+            rows = (
+                db.query(models.Product)
+                .filter(models.Product.id.in_(payload.product_ids))
+                .all()
+            )
+            by_id = {p.id: p for p in rows}
+            prods = [by_id[i] for i in payload.product_ids if i in by_id][:3]
+        else:
+            # auto-pick featured/newest in-stock
+            prods = (
+                db.query(models.Product)
+                .filter(models.Product.is_active == True, models.Product.stock > 0)  # noqa: E712
+                .order_by(models.Product.is_featured.desc(), models.Product.created_at.desc())
+                .limit(3)
+                .all()
+            )
+        showcase = build_product_showcase(prods, payload.showcase_title)
+
+    sent, failed = 0, 0
+    for em in emails:
+        try:
+            send_campaign_email(em, payload.subject, payload.message, showcase)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            print("[campaign] failed for", em, ":", e)
+    return {"sent": sent, "failed": failed, "total": len(emails)}
+
+
 @router.get("/reviews", response_model=List[schemas.ReviewOut])
 def list_all_reviews(db: Session = Depends(get_db), _: str = Depends(require_admin)):
     return db.query(models.Review).order_by(models.Review.created_at.desc()).all()
+
+
+@router.put("/reviews/{review_id}/visibility", response_model=schemas.ReviewOut)
+def set_review_visibility(
+    review_id: int,
+    show: bool,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_admin),
+):
+    r = db.query(models.Review).filter(models.Review.id == review_id).first()
+    if not r:
+        raise HTTPException(404, "Review not found")
+    r.show_on_site = show
+    db.commit()
+    db.refresh(r)
+    return r
 
 
 @router.delete("/reviews/{review_id}")
