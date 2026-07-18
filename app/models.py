@@ -154,6 +154,11 @@ class Setting(Base):
     banner_end = Column(String(40), default="")
     # Instagram profile URL — if set, storefront shows a "Follow us" section
     instagram_url = Column(String(200), default="")
+    # homepage sections (admin toggles + editable stat numbers)
+    show_stats = Column(Boolean, default=True)
+    show_loyalty = Column(Boolean, default=True)
+    stat_orders = Column(String(20), default="500")
+    stat_designs = Column(String(20), default="50")
 
 
 class Coupon(Base):

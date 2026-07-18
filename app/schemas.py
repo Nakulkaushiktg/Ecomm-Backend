@@ -250,6 +250,10 @@ class SettingsOut(BaseModel):
     banner_start: str = ""
     banner_end: str = ""
     instagram_url: str = ""
+    show_stats: bool = True
+    show_loyalty: bool = True
+    stat_orders: str = "500"
+    stat_designs: str = "50"
 
 
 class SettingsUpdate(BaseModel):
@@ -262,6 +266,10 @@ class SettingsUpdate(BaseModel):
     banner_start: Optional[str] = None
     banner_end: Optional[str] = None
     instagram_url: Optional[str] = None
+    show_stats: Optional[bool] = None
+    show_loyalty: Optional[bool] = None
+    stat_orders: Optional[str] = None
+    stat_designs: Optional[str] = None
 
 
 # ---------- Track order (public) ----------
@@ -425,6 +433,10 @@ class StoreConfig(BaseModel):
     banner_start: str = ""
     banner_end: str = ""
     instagram_url: str = ""
+    show_stats: bool = True
+    show_loyalty: bool = True
+    stat_orders: str = "500"
+    stat_designs: str = "50"
 
 
 class RazorpayCreateResponse(BaseModel):

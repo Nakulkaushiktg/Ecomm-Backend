@@ -456,4 +456,8 @@ def store_config(db: Session = Depends(get_db)):
         banner_start=cfg.banner_start or "",
         banner_end=cfg.banner_end or "",
         instagram_url=cfg.instagram_url or "",
+        show_stats=cfg.show_stats if cfg.show_stats is not None else True,
+        show_loyalty=cfg.show_loyalty if cfg.show_loyalty is not None else True,
+        stat_orders=cfg.stat_orders or "500",
+        stat_designs=cfg.stat_designs or "50",
     )

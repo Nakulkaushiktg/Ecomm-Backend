@@ -30,6 +30,10 @@ def _run_migrations():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS gift_pending BOOLEAN DEFAULT FALSE",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_claimed BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS show_stats BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS show_loyalty BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS stat_orders VARCHAR(20) DEFAULT '500'",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS stat_designs VARCHAR(20) DEFAULT '50'",
     ]
     with engine.begin() as conn:
         for s in stmts:
