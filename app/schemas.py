@@ -110,6 +110,7 @@ class OrderCreate(BaseModel):
     razorpay_order_id: str = ""
     razorpay_payment_id: str = ""
     razorpay_signature: str = ""
+    claim_gift: bool = False  # redeem a loyalty gift with this order
     items: List[OrderItemIn]
 
 
@@ -137,6 +138,7 @@ class OrderOut(BaseModel):
     status: str
     courier: str
     tracking_id: str
+    gift_claimed: bool = False
     created_at: datetime
     items: List[OrderItemOut]
 
@@ -376,6 +378,8 @@ class UserOut(BaseModel):
     city: str = ""
     state: str = ""
     pincode: str = ""
+    points: int = 0
+    gift_pending: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -395,6 +399,8 @@ class AdminCustomerOut(BaseModel):
     state: str = ""
     pincode: str = ""
     reset_requested: bool = False
+    points: int = 0
+    gift_pending: bool = False
     created_at: datetime
     order_count: int = 0
 

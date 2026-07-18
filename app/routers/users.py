@@ -134,6 +134,24 @@ def update_me(
     return user
 
 
+@router.post("/claim-gift", response_model=schemas.UserOut)
+def claim_gift(db: Session = Depends(get_db), user: models.User = Depends(require_user)):
+    """Customer redeems 5 loyalty points for a gift with their next order."""
+    if (user.points or 0) < 5:
+        raise HTTPException(400, "You need 5 points to claim a gift.")
+    if user.gift_pending:
+        raise HTTPException(400, "You already have a gift claim pending.")
+    user.gift_pending = True
+    db.commit()
+    db.refresh(user)
+    try:
+        from ..notify import notify_gift_claim
+        notify_gift_claim(user)
+    except Exception as e:
+        print("[gift] notify failed:", e)
+    return user
+
+
 @router.get("/orders", response_model=List[schemas.OrderOut])
 def my_orders(
     db: Session = Depends(get_db),

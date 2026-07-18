@@ -221,6 +221,15 @@ def create_order(
         user.city = payload.city or user.city
         user.state = payload.state or user.state
         user.pincode = payload.pincode or user.pincode
+        # loyalty gift: eligible if they already had 5+ points before this order
+        eligible = (user.points or 0) >= 5
+        # 1 point for every order of Rs.1000 or more
+        if order.total >= 1000:
+            user.points = (user.points or 0) + 1
+        # redeem the gift with this order (ships together); points reset by 5
+        if payload.claim_gift and eligible:
+            order.gift_claimed = True
+            user.points = max(0, (user.points or 0) - 5)
 
     db.commit()
     db.refresh(order)

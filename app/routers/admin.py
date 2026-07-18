@@ -38,6 +38,10 @@ def admin_stats(db: Session = Depends(get_db), _: str = Depends(require_admin)):
         "low_stock": sum(1 for p in products if 0 < p.stock <= 5),
         "out_of_stock": sum(1 for p in products if p.stock <= 0),
         "total_customers": db.query(models.User).count(),
+        # gift orders not yet delivered — owner still needs to ship the gift
+        "gift_claims": sum(
+            1 for o in orders if o.gift_claimed and o.status not in ("delivered", "cancelled")
+        ),
     }
 
 
@@ -243,6 +247,25 @@ def admin_list_orders(
     if status:
         q = q.filter(models.Order.status == status)
     return q.order_by(models.Order.created_at.desc()).all()
+
+
+@router.post("/orders/delete-all")
+def delete_all_orders(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """Permanently delete ALL orders and their items."""
+    db.query(models.OrderItem).delete(synchronize_session=False)
+    n = db.query(models.Order).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "deleted": n}
+
+
+@router.delete("/orders/{order_id}")
+def delete_order(order_id: int, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    o = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not o:
+        raise HTTPException(404, "Order not found")
+    db.delete(o)  # items cascade via relationship
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/orders/{order_id}", response_model=schemas.OrderOut)
@@ -506,6 +529,17 @@ def admin_delete_banner(banner_id: int, db: Session = Depends(get_db), _: str = 
         db.delete(b)
         db.commit()
     return {"ok": True}
+
+
+@router.get("/gift-orders", response_model=List[schemas.OrderOut])
+def list_gift_orders(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """Orders that include a free loyalty gift — owner ships the gift with these."""
+    return (
+        db.query(models.Order)
+        .filter(models.Order.gift_claimed == True)  # noqa: E712
+        .order_by(models.Order.created_at.desc())
+        .all()
+    )
 
 
 @router.get("/subscribers", response_model=List[schemas.SubscriberOut])

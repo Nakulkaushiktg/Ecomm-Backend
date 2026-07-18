@@ -27,6 +27,9 @@ def _run_migrations():
         "ALTER TABLE settings ADD COLUMN IF NOT EXISTS banner_start VARCHAR(40) DEFAULT ''",
         "ALTER TABLE settings ADD COLUMN IF NOT EXISTS banner_end VARCHAR(40) DEFAULT ''",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number VARCHAR(20)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS gift_pending BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS gift_claimed BOOLEAN DEFAULT FALSE",
     ]
     with engine.begin() as conn:
         for s in stmts:

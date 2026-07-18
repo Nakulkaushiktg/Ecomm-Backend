@@ -69,6 +69,9 @@ class User(Base):
     reset_requested = Column(Boolean, default=False)  # customer asked admin to reset
     reset_otp = Column(String(200), default="")        # hashed one-time reset code
     reset_otp_expiry = Column(DateTime, nullable=True)  # code valid until this time
+    # loyalty: 1 point per order >= Rs.1000; 5 points -> claimable gift
+    points = Column(Integer, default=0)
+    gift_pending = Column(Boolean, default=False)  # claimed a gift, awaiting fulfilment
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -111,6 +114,7 @@ class Order(Base):
     # shiprocket / courier shipment tracking
     courier = Column(String(80), default="")
     tracking_id = Column(String(120), default="")
+    gift_claimed = Column(Boolean, default=False)  # a loyalty gift ships with this order
     created_at = Column(DateTime, default=datetime.utcnow)
 
     items = relationship(

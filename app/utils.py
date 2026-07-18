@@ -44,6 +44,10 @@ def build_whatsapp_url(order) -> str:
     lines = [
         "*NEW ORDER* \U0001f6cd️",
         f"Order #{order.order_number or order.id}",
+    ]
+    if getattr(order, "gift_claimed", False):
+        lines.append("\U0001f381 *INCLUDE FREE GIFT with this order!*")
+    lines += [
         "",
         f"*Customer:* {order.customer_name}",
         f"*Phone:* {order.phone}",

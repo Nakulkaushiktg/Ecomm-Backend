@@ -227,6 +227,10 @@ def _build_html(order) -> str:
 def _build_text(order) -> str:
     lines = [
         "🛍️ NEW ORDER #%s" % (order.order_number or order.id),
+    ]
+    if getattr(order, "gift_claimed", False):
+        lines.append("🎁 INCLUDE FREE LOYALTY GIFT with this order!")
+    lines += [
         "",
         "Customer: %s" % order.customer_name,
         "Phone: %s" % order.phone,
@@ -294,6 +298,16 @@ def _build_customer_html(order) -> str:
         "cancelled": "Your order has been cancelled. Please reach out if this was a mistake.",
     }.get(order.status, "Your order is confirmed. 🙏")
 
+    gift_block = ""
+    if getattr(order, "gift_claimed", False):
+        gift_block = (
+            '<div style="margin-top:16px;padding:14px 16px;background:#fff4e0;border:1px solid #E8C77E;'
+            'border-radius:10px;font-size:14px;text-align:center;">'
+            "&#127873; <b>A FREE loyalty gift is included with this order!</b><br>"
+            "Your 5 reward points have been redeemed. Thank you for being a loyal customer &#128153;"
+            "</div>"
+        )
+
     track_block = ""
     if order.tracking_id:
         track_block = """
@@ -344,6 +358,7 @@ def _build_customer_html(order) -> str:
         </thead>
         <tbody>{rows}</tbody>
       </table>
+      {gift_block}
 
       <table style="width:100%;font-size:14px;margin-top:12px;">
         {tot_rows}
@@ -365,7 +380,7 @@ def _build_customer_html(order) -> str:
   </div>
 </div>""".format(
         cname=order.customer_name, status_msg=status_msg, oid=(order.order_number or order.id),
-        rows=rows, tot_rows=tot_rows, addr=addr, track_block=track_block,
+        rows=rows, tot_rows=tot_rows, addr=addr, track_block=track_block, gift_block=gift_block,
     )
 
 
@@ -448,6 +463,17 @@ def build_product_showcase(products, title: str = "Handpicked for You") -> str:
         "</div>"
         '<table width="100%" cellspacing="0" cellpadding="0"><tr>' + cells + "</tr></table></div>"
     )
+
+
+def notify_gift_claim(user) -> None:
+    """Tell the owner a customer redeemed a loyalty gift (fire-and-forget)."""
+    if not _email_enabled():
+        return
+    to = settings.NOTIFY_EMAIL_TO or settings.EMAIL or settings.BREVO_SENDER
+    text = "%s (%s, %s) redeemed a loyalty gift 🎁.\nSend it with their next order, then mark it given in the admin panel." % (
+        user.name, user.email, user.phone or "no phone"
+    )
+    _deliver(to, "🎁 Gift Claim - Kirti Thread Art", text=text)
 
 
 def send_campaign_email(to_email: str, subject: str, message: str, showcase_html: str = "") -> None:
