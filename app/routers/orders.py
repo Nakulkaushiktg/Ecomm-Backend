@@ -1,12 +1,10 @@
-import hashlib
-import hmac
 import json
-import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -14,60 +12,15 @@ from ..auth import optional_user
 from ..config import settings
 from ..store import get_settings
 from ..utils import build_whatsapp_url, calc_shipping, calc_cod_fee, apply_coupon
-from ..notify import notify_owner_order, send_contact_email, send_customer_email
+from ..ratelimit import rate_limit
+from ..order_ops import compute_totals, place_order, price_cart
+from ..notify import (
+    notify_low_stock, notify_owner_alert, notify_owner_order, send_contact_email,
+    send_customer_email_bg,
+)
 from .. import models, schemas, razorpay_client
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
-
-
-def _gen_order_number(db: Session) -> str:
-    """Random, non-guessable public order number, e.g. KTA-7F3K9Q2M."""
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no ambiguous 0/O/1/I
-    for _ in range(12):
-        num = "KTA-" + "".join(secrets.choice(alphabet) for _ in range(8))
-        if not db.query(models.Order).filter(models.Order.order_number == num).first():
-            return num
-    return "KTA-" + secrets.token_hex(5).upper()
-
-
-def _match_variant(product, size, color):
-    """Find the variant row matching the chosen size+color, if any."""
-    for v in product.variants:
-        if v.size == size and v.color == color:
-            return v
-    return None
-
-
-def _unit_price(product, size, color):
-    """Per-unit price: variant price if set (>0), else the product base price."""
-    v = _match_variant(product, size, color)
-    if v and v.price and v.price > 0:
-        return v.price
-    return product.price
-
-
-def _price_cart(db: Session, items):
-    """Return (subtotal, total_weight, priced_products) and validate availability."""
-    subtotal = 0.0
-    weight = 0
-    priced = []
-    for item in items:
-        product = db.query(models.Product).filter(
-            models.Product.id == item.product_id
-        ).first()
-        if not product or not product.is_active:
-            raise HTTPException(400, f"Product {item.product_id} unavailable")
-        qty = max(1, item.quantity)
-        size = getattr(item, "size", "")
-        color = getattr(item, "color", "")
-        unit = _unit_price(product, size, color)
-        subtotal += unit * qty
-        weight += (product.weight_grams or 500) * qty
-        label = getattr(item, "variant", "") or ", ".join(
-            [x for x in [f"Size: {size}" if size else "", f"Color: {color}" if color else ""] if x]
-        )
-        priced.append((product, qty, label, size, color, unit))
-    return round(subtotal, 2), weight, priced
 
 
 @router.post("/quote", response_model=schemas.ShippingQuote)
@@ -75,7 +28,7 @@ def quote(payload: schemas.ShippingQuoteRequest, db: Session = Depends(get_db)):
     if not payload.items:
         raise HTTPException(400, "Cart is empty")
     cfg = get_settings(db)
-    subtotal, weight, _ = _price_cart(db, payload.items)
+    subtotal, weight, _ = price_cart(db, payload.items)
     discount, code, err = apply_coupon(db, payload.coupon_code, subtotal)
     discounted = max(0.0, subtotal - discount)
     method = payload.payment_method if cfg.enable_cod or payload.payment_method != "cod" else "upi"
@@ -93,30 +46,78 @@ def quote(payload: schemas.ShippingQuoteRequest, db: Session = Depends(get_db)):
     )
 
 
-def _compute_totals(db, cfg, items, coupon_code, method):
-    subtotal, weight, priced = _price_cart(db, items)
-    discount, code, _ = apply_coupon(db, coupon_code, subtotal)
-    discounted = max(0.0, subtotal - discount)
-    shipping = calc_shipping(cfg, discounted, weight)
-    cod = calc_cod_fee(cfg, method)
-    total = round(discounted + shipping + cod, 2)
-    return subtotal, discount, code, shipping, cod, total, priced
+def _paise(rupees: float) -> int:
+    return int(round(rupees * 100))
 
 
 @router.post("/razorpay/create", response_model=schemas.RazorpayCreateResponse)
-def razorpay_create(payload: schemas.ShippingQuoteRequest, db: Session = Depends(get_db)):
+def razorpay_create(
+    payload: schemas.RazorpayCreateRequest,
+    db: Session = Depends(get_db),
+    user=Depends(optional_user),
+):
     if not razorpay_client.is_enabled():
         raise HTTPException(400, "Razorpay is not configured")
     if not payload.items:
         raise HTTPException(400, "Cart is empty")
     cfg = get_settings(db)
-    *_, total, _priced = _compute_totals(db, cfg, payload.items, payload.coupon_code, "razorpay")
+    *_, total, _priced = compute_totals(db, cfg, payload.items, payload.coupon_code, "razorpay")
     rzp = razorpay_client.create_order(total)
+    # remember the amount (and the checkout form, if sent) for this Razorpay order:
+    # the amount is checked when the order is placed, and the form lets the
+    # webhook place the order if the customer's browser never comes back
+    form = payload.model_dump()
+    form["payment_method"] = "razorpay"
+    db.add(models.PendingPayment(
+        razorpay_order_id=rzp["id"],
+        user_id=user.id if user else None,
+        payload=form if payload.customer_name.strip() else {},
+        amount_paise=int(rzp["amount"]),
+    ))
+    db.commit()
     return schemas.RazorpayCreateResponse(
         razorpay_order_id=rzp["id"],
         razorpay_key_id=settings.RAZORPAY_KEY_ID,
         amount=rzp["amount"],
     )
+
+
+def _razorpay_amount(db: Session, razorpay_order_id: str):
+    """(amount in paise the customer was charged for, PendingPayment row or None)."""
+    pending = (
+        db.query(models.PendingPayment)
+        .filter(models.PendingPayment.razorpay_order_id == razorpay_order_id)
+        .first()
+    )
+    if pending:
+        return pending.amount_paise, pending
+    # created before PendingPayment existed — ask Razorpay
+    try:
+        return int(razorpay_client.fetch_order(razorpay_order_id)["amount"]), None
+    except Exception as e:
+        print("[razorpay] fetch order failed:", e)
+        raise HTTPException(502, "Could not confirm the payment amount. Please contact us.")
+
+
+def _order_by_payment(db: Session, payment_id: str):
+    if not payment_id:
+        return None
+    return (
+        db.query(models.Order)
+        .filter(models.Order.razorpay_payment_id == payment_id)
+        .first()
+    )
+
+
+def _after_order(order, low_stock_alerts):
+    """Notifications after an order is committed — never break the order."""
+    notify_owner_order(order)
+    try:
+        send_customer_email_bg(order)
+    except Exception as e:
+        print("[order] customer email failed:", e)
+    if low_stock_alerts:
+        notify_low_stock(low_stock_alerts)
 
 
 @router.post("", response_model=schemas.OrderCreateResponse)
@@ -133,7 +134,7 @@ def create_order(
     if method == "cod" and not cfg.enable_cod:
         raise HTTPException(400, "Cash on Delivery is not available")
 
-    # Razorpay: verify the payment signature before creating the order
+    pending = None
     if method == "razorpay":
         if not razorpay_client.is_enabled():
             raise HTTPException(400, "Razorpay is not configured")
@@ -144,137 +145,116 @@ def create_order(
         )
         if not ok:
             raise HTTPException(400, "Payment verification failed")
-
-    subtotal, weight, priced = _price_cart(db, payload.items)
-    discount, code, _ = apply_coupon(db, payload.coupon_code, subtotal)
-    discounted = max(0.0, subtotal - discount)
-    shipping = calc_shipping(cfg, discounted, weight)
-    cod = calc_cod_fee(cfg, method)
-
-    order = models.Order(
-        order_number=_gen_order_number(db),
-        user_id=user.id if user else None,
-        customer_name=payload.customer_name,
-        phone=payload.phone,
-        email=payload.email,
-        address=payload.address,
-        city=payload.city,
-        state=payload.state,
-        pincode=payload.pincode,
-        note=payload.note,
-        upi_txn_ref=payload.upi_txn_ref if method == "upi" else "",
-        razorpay_payment_id=payload.razorpay_payment_id if method == "razorpay" else "",
-        payment_method=method,
-        subtotal=subtotal,
-        discount=discount,
-        coupon_code=code,
-        shipping_fee=shipping,
-        cod_fee=cod,
-        total=round(discounted + shipping + cod, 2),
-        # razorpay payments are verified, so mark them paid immediately
-        status="paid" if method == "razorpay" else "pending",
-    )
-
-    low_stock_alerts = []
-    for product, qty, label, size, color, unit_price in priced:
-        if product.variants:
-            # per-variant stock: find the matching size+color row
-            match = next(
-                (v for v in product.variants if v.size == size and v.color == color),
-                None,
+        # same payment submitted again (retry, or the webhook got there first)
+        existing = _order_by_payment(db, payload.razorpay_payment_id)
+        if existing:
+            return schemas.OrderCreateResponse(order=existing, whatsapp_url=build_whatsapp_url(existing))
+        # the signature only proves this payment belongs to that Razorpay order —
+        # make sure that Razorpay order was for THIS cart's total
+        paid, pending = _razorpay_amount(db, payload.razorpay_order_id)
+        *_, total, _p = compute_totals(db, cfg, payload.items, payload.coupon_code, "razorpay")
+        if paid != _paise(total):
+            raise HTTPException(
+                400,
+                "Payment amount does not match the order total. Please contact us with "
+                f"payment reference {payload.razorpay_payment_id}.",
             )
-            if not match:
-                raise HTTPException(400, f"Please select options for '{product.name}'")
-            if match.stock < qty:
-                raise HTTPException(
-                    400, f"'{product.name}' ({label}) has only {match.stock} left"
-                )
-            match.stock -= qty
-            product.stock = sum(v.stock for v in product.variants)
-            if 0 <= match.stock < 5:
-                low_stock_alerts.append((f"{product.name} ({label})", match.stock))
-        else:
-            if product.stock < qty:
-                raise HTTPException(
-                    400, f"'{product.name}' has only {product.stock} left in stock"
-                )
-            product.stock -= qty  # auto out-of-stock when it hits 0
-            if 0 <= product.stock < 5:
-                low_stock_alerts.append((product.name, product.stock))
-        order.items.append(
-            models.OrderItem(
-                product_id=product.id,
-                product_name=product.name,
-                price=unit_price,
-                quantity=qty,
-                variant=label,
-            )
-        )
 
-    db.add(order)
-
-    # remember the customer's latest details on their account for next time
-    if user:
-        user.name = payload.customer_name or user.name
-        user.phone = payload.phone or user.phone
-        user.address = payload.address or user.address
-        user.city = payload.city or user.city
-        user.state = payload.state or user.state
-        user.pincode = payload.pincode or user.pincode
-        # loyalty gift: eligible if they already had 5+ points before this order
-        eligible = (user.points or 0) >= 5
-        # 1 point for every order of Rs.1000 or more
-        if order.total >= 1000:
-            user.points = (user.points or 0) + 1
-        # redeem the gift with this order (ships together); points reset by 5
-        if payload.claim_gift and eligible:
-            order.gift_claimed = True
-            user.points = max(0, (user.points or 0) - 5)
-
-    db.commit()
+    order, low_stock_alerts = place_order(db, payload, user, method)
+    if pending:
+        db.flush()
+        pending.order_id = order.id
+    try:
+        db.commit()
+    except IntegrityError:
+        # the webhook placed this payment's order at the same moment
+        db.rollback()
+        existing = _order_by_payment(db, payload.razorpay_payment_id)
+        if not existing:
+            raise
+        return schemas.OrderCreateResponse(order=existing, whatsapp_url=build_whatsapp_url(existing))
     db.refresh(order)
 
-    # automatic notification to owner (if a provider is configured)
-    notify_owner_order(order)
-    # confirmation email to the customer — never let a mail failure break the order
-    try:
-        send_customer_email(order)
-    except Exception as e:
-        print("[order] customer email failed:", e)
-    if low_stock_alerts:
-        from ..notify import notify_low_stock
-        notify_low_stock(low_stock_alerts)
-
+    _after_order(order, low_stock_alerts)
     return schemas.OrderCreateResponse(
         order=order,
         whatsapp_url=build_whatsapp_url(order),
     )
 
 
+def _place_from_webhook(db: Session, entity: dict):
+    """Payment captured but no order yet (browser closed / network died after
+    paying): place it from the checkout form saved at /razorpay/create."""
+    payment_id = entity.get("id", "")
+    rzp_order_id = entity.get("order_id", "")
+    pending = (
+        db.query(models.PendingPayment)
+        .filter(models.PendingPayment.razorpay_order_id == rzp_order_id)
+        .first()
+    )
+    if not pending or pending.order_id or not pending.payload:
+        return
+    ref = "Razorpay payment %s (order %s), amount Rs.%.0f" % (
+        payment_id, rzp_order_id, (entity.get("amount") or 0) / 100
+    )
+    if int(entity.get("amount") or 0) != pending.amount_paise:
+        notify_owner_alert("Payment received but amount mismatch", ref)
+        return
+    user = None
+    if pending.user_id:
+        user = db.query(models.User).filter(models.User.id == pending.user_id).first()
+    data = dict(pending.payload)
+    data.update(
+        razorpay_order_id=rzp_order_id, razorpay_payment_id=payment_id, payment_method="razorpay"
+    )
+    try:
+        payload = schemas.OrderCreate(**data)
+        order, low_stock_alerts = place_order(db, payload, user, "razorpay")
+        db.flush()
+        pending.order_id = order.id
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # the browser placed it at the same moment — fine
+        return
+    except HTTPException as e:
+        db.rollback()
+        notify_owner_alert(
+            "PAID but order could not be created",
+            "%s. Reason: %s. Customer: %s %s. Contact the customer or refund from "
+            "the Razorpay dashboard." % (ref, e.detail, data.get("customer_name"), data.get("phone")),
+        )
+        return
+    db.refresh(order)
+    _after_order(order, low_stock_alerts)
+
+
 @router.post("/razorpay/webhook")
 async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
-    """Server-side confirmation from Razorpay (configure URL in Razorpay dashboard).
-    Verifies the webhook signature and marks the matching order paid."""
-    secret = settings.RAZORPAY_WEBHOOK_SECRET
+    """Server-side confirmation from Razorpay (configure URL in Razorpay dashboard,
+    event: payment.captured). Verifies the signature, marks the matching order
+    paid, or places the order if the customer's browser never came back."""
     body = await request.body()
-    signature = request.headers.get("X-Razorpay-Signature", "")
-    if secret:
-        expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, signature):
-            raise HTTPException(400, "Invalid webhook signature")
+    if not settings.RAZORPAY_WEBHOOK_SECRET:
+        raise HTTPException(503, "Webhook secret not configured")
+    if not razorpay_client.verify_webhook(body, request.headers.get("X-Razorpay-Signature", "")):
+        raise HTTPException(400, "Invalid webhook signature")
     try:
         data = json.loads(body)
-        entity = data.get("payload", {}).get("payment", {}).get("entity", {})
-        payment_id = entity.get("id", "")
-        if payment_id:
-            order = db.query(models.Order).filter(
-                models.Order.razorpay_payment_id == payment_id
-            ).first()
-            if order and order.status == "pending":
-                order.status = "paid"
-                db.commit()
-    except Exception as e:
-        print("[webhook] parse error:", e)
+    except ValueError:
+        raise HTTPException(400, "Invalid JSON")
+    if data.get("event") not in ("payment.captured", "order.paid"):
+        return {"ok": True}
+    entity = data.get("payload", {}).get("payment", {}).get("entity", {}) or {}
+    payment_id = entity.get("id", "")
+    if not payment_id:
+        return {"ok": True}
+    order = _order_by_payment(db, payment_id)
+    if order:
+        if order.status == "pending":
+            order.status = "paid"
+            db.commit()
+    else:
+        _place_from_webhook(db, entity)
     return {"ok": True}
 
 
@@ -346,26 +326,39 @@ def _track_summary(raw):
 
 
 @router.post("/track", response_model=schemas.OrderOut)
-def track_order(payload: schemas.TrackRequest, db: Session = Depends(get_db)):
+def track_order(payload: schemas.TrackRequest, request: Request, db: Session = Depends(get_db)):
     """Public: customer looks up their order by order number (or legacy id) + phone."""
-    ref = (payload.order_id or "").strip()
+    rate_limit(request, "track", max_calls=20, window_sec=600)
+    not_found = HTTPException(404, "No order found with that ID and phone number")
+    ref = (payload.order_id or "").strip().upper()
+    phone_digits = "".join(filter(str.isdigit, payload.phone))[-10:]
+    if len(phone_digits) < 10:
+        raise not_found
     order = db.query(models.Order).filter(models.Order.order_number == ref).first()
-    if not order and ref.isdigit():  # legacy orders had numeric ids
-        order = db.query(models.Order).filter(models.Order.id == int(ref)).first()
-    phone_digits = "".join(filter(str.isdigit, payload.phone))
-    if not order or phone_digits[-10:] not in "".join(filter(str.isdigit, order.phone)):
-        raise HTTPException(404, "No order found with that ID and phone number")
+    if not order and ref.isdigit():
+        # legacy orders (placed before order numbers existed) only
+        order = (
+            db.query(models.Order)
+            .filter(models.Order.id == int(ref), models.Order.order_number.is_(None))
+            .first()
+        )
+    if not order:
+        raise not_found
+    if "".join(filter(str.isdigit, order.phone or ""))[-10:] != phone_digits:
+        raise not_found
     return order
 
 
 @router.post("/contact")
-def contact(payload: schemas.ContactMessage):
+def contact(payload: schemas.ContactMessage, request: Request):
+    rate_limit(request, "contact", max_calls=5, window_sec=600)
     if not payload.name.strip() or not payload.message.strip():
         raise HTTPException(400, "Name and message are required")
     try:
         send_contact_email(payload.name, payload.email, payload.phone, payload.message)
     except Exception as e:
-        raise HTTPException(502, f"Could not send message: {e}")
+        print("[contact] send failed:", e)
+        raise HTTPException(502, "Could not send your message right now. Please try WhatsApp instead.")
     return {"ok": True}
 
 
@@ -419,8 +412,9 @@ def testimonials(db: Session = Depends(get_db)):
 
 
 @router.post("/subscribe")
-def subscribe(payload: schemas.SubscribeRequest, db: Session = Depends(get_db)):
+def subscribe(payload: schemas.SubscribeRequest, request: Request, db: Session = Depends(get_db)):
     """Store a newsletter subscriber (ignores duplicates) and notify the owner."""
+    rate_limit(request, "subscribe", max_calls=5, window_sec=600)
     email = payload.email.strip().lower()
     if "@" not in email or "." not in email:
         raise HTTPException(400, "Please enter a valid email address")

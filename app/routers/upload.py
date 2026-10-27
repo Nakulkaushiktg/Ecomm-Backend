@@ -1,15 +1,17 @@
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request
 
-from ..auth import require_admin
+from ..auth import require_admin, require_user
 from ..config import settings
+from ..ratelimit import rate_limit
 
 router = APIRouter(prefix="/api/admin/upload", tags=["upload"])
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "products")
 ALLOWED = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".mov"}
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXT = {".mp4", ".webm", ".mov"}
 
 # Cloudinary stores files on a CDN, so they survive Render deploys/restarts.
@@ -30,9 +32,9 @@ if _cloudinary_ready:
     )
 
 
-def _save(file: UploadFile, subdir: str, url_prefix: str):
+def _save(file: UploadFile, subdir: str, url_prefix: str, allowed=ALLOWED):
     ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED:
+    if ext not in allowed:
         raise HTTPException(400, f"File type {ext} not allowed")
 
     # Preferred: upload to Cloudinary -> permanent CDN URL stored in DB.
@@ -66,7 +68,12 @@ public_router = APIRouter(prefix="/api/upload", tags=["upload"])
 
 
 @public_router.post("/review")
-def upload_review_image(file: UploadFile = File(...)):
+def upload_review_image(
+    request: Request,
+    file: UploadFile = File(...),
+    _user=Depends(require_user),  # only logged-in customers (reviews need login anyway)
+):
+    rate_limit(request, "review-upload", max_calls=10, window_sec=3600)
     if file.size and file.size > 5 * 1024 * 1024:
         raise HTTPException(400, "Image too large (max 5MB)")
-    return _save(file, "reviews", "/uploads/reviews")
+    return _save(file, "reviews", "/uploads/reviews", allowed=IMAGE_EXT)

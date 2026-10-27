@@ -1,5 +1,4 @@
 import secrets
-import time
 from datetime import datetime, timedelta
 from typing import List
 
@@ -11,24 +10,10 @@ from ..auth import (
     hash_password, verify_password, create_access_token, require_user,
 )
 from ..notify import send_reset_otp
+from ..ratelimit import rate_limit as _rate_limit
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-# simple in-memory rate limiter (per IP + action) to slow brute-force attempts
-_rate_hits: dict[str, list[float]] = {}
-
-
-def _rate_limit(request: Request, action: str, max_calls: int, window_sec: int):
-    ip = request.client.host if request.client else "unknown"
-    key = f"{action}:{ip}"
-    now = time.time()
-    hits = [t for t in _rate_hits.get(key, []) if now - t < window_sec]
-    if len(hits) >= max_calls:
-        raise HTTPException(429, "Too many attempts. Please wait a few minutes and try again.")
-    hits.append(now)
-    _rate_hits[key] = hits
-
 
 def _auth_response(user: models.User) -> schemas.AuthResponse:
     token = create_access_token(str(user.id), role="user")
@@ -36,7 +21,8 @@ def _auth_response(user: models.User) -> schemas.AuthResponse:
 
 
 @router.post("/register", response_model=schemas.AuthResponse)
-def register(payload: schemas.UserRegister, db: Session = Depends(get_db)):
+def register(payload: schemas.UserRegister, request: Request, db: Session = Depends(get_db)):
+    _rate_limit(request, "register", max_calls=10, window_sec=3600)
     email = payload.email.strip().lower()
     if not email or "@" not in email:
         raise HTTPException(400, "A valid email is required")

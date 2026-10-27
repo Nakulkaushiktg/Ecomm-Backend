@@ -9,6 +9,7 @@ Set NOTIFY_PROVIDER in .env to ONE of:
 
 Sending runs in a background thread so it never slows/breaks the order.
 """
+import html as _html
 import json
 import smtplib
 import threading
@@ -19,6 +20,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from .config import settings
+
+
+def _e(value) -> str:
+    """HTML-escape customer-supplied text before putting it in an email."""
+    return _html.escape(str(value or ""))
 
 
 def _email_enabled() -> bool:
@@ -136,19 +142,19 @@ def _build_html(order) -> str:
           <td style="padding:10px 12px;border-bottom:1px solid #eee;">{name}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:center;">{qty}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;">&#8377;{amt:.0f}</td>
-        </tr>""".format(name=it.product_name, qty=it.quantity, amt=it.price * it.quantity)
+        </tr>""".format(name=_e(it.product_name), qty=it.quantity, amt=it.price * it.quantity)
         for it in order.items
     )
 
     pay = (
         "Cash on Delivery"
         if order.payment_method == "cod"
-        else "UPI &nbsp;&middot;&nbsp; Ref: %s" % (order.upi_txn_ref or "not provided")
+        else "UPI &nbsp;&middot;&nbsp; Ref: %s" % _e(order.upi_txn_ref or "not provided")
     )
     discount_row = (
         '<tr><td style="padding:4px 12px;color:#15803d;">Discount (%s)</td>'
         '<td style="padding:4px 12px;text-align:right;color:#15803d;">&minus; &#8377;%.0f</td></tr>'
-        % (order.coupon_code, order.discount)
+        % (_e(order.coupon_code), order.discount)
         if order.discount else ""
     )
     cod_row = (
@@ -157,8 +163,8 @@ def _build_html(order) -> str:
         if order.cod_fee else ""
     )
     addr = "%s<br>%s" % (
-        order.address,
-        ", ".join([x for x in [order.city, order.state, order.pincode] if x]),
+        _e(order.address),
+        _e(", ".join([x for x in [order.city, order.state, order.pincode] if x])),
     )
 
     return """
@@ -218,7 +224,7 @@ def _build_html(order) -> str:
     </div>
   </div>
 </div>""".format(
-        oid=(order.order_number or order.id), cname=order.customer_name, phone=order.phone, addr=addr,
+        oid=(order.order_number or order.id), cname=_e(order.customer_name), phone=_e(order.phone), addr=addr,
         rows=rows, subtotal=order.subtotal, discount_row=discount_row,
         shipping=order.shipping_fee, cod_row=cod_row, total=order.total, pay=pay,
     )
@@ -287,7 +293,7 @@ def _build_customer_html(order) -> str:
           <td style="padding:10px 12px;border-bottom:1px solid #eee;">{name}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:center;">{qty}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;">&#8377;{amt:.0f}</td>
-        </tr>""".format(name=it.product_name, qty=it.quantity, amt=it.price * it.quantity)
+        </tr>""".format(name=_e(it.product_name), qty=it.quantity, amt=it.price * it.quantity)
         for it in order.items
     )
     status_msg = {
@@ -316,11 +322,11 @@ def _build_customer_html(order) -> str:
         Courier: {courier}<br>
         Tracking ID: {tid}<br>
         <a href="https://www.shiprocket.in/shipment-tracking/{tid}" style="color:#7B2D26;">Track your shipment &#8599;</a>
-      </div>""".format(courier=order.courier or "Courier", tid=order.tracking_id)
+      </div>""".format(courier=_e(order.courier or "Courier"), tid=_e(order.tracking_id))
 
     addr = "%s<br>%s" % (
-        order.address,
-        ", ".join([x for x in [order.city, order.state, order.pincode] if x]),
+        _e(order.address),
+        _e(", ".join([x for x in [order.city, order.state, order.pincode] if x])),
     )
     pay = (
         "Cash on Delivery"
@@ -329,7 +335,7 @@ def _build_customer_html(order) -> str:
     )
     tot_rows = '<tr><td style="padding:3px 12px;color:#666;">Subtotal</td><td style="padding:3px 12px;text-align:right;">&#8377;%.0f</td></tr>' % order.subtotal
     if order.discount:
-        tot_rows += '<tr><td style="padding:3px 12px;color:#15803d;">Discount (%s)</td><td style="padding:3px 12px;text-align:right;color:#15803d;">&minus; &#8377;%.0f</td></tr>' % (order.coupon_code, order.discount)
+        tot_rows += '<tr><td style="padding:3px 12px;color:#15803d;">Discount (%s)</td><td style="padding:3px 12px;text-align:right;color:#15803d;">&minus; &#8377;%.0f</td></tr>' % (_e(order.coupon_code), order.discount)
     tot_rows += '<tr><td style="padding:3px 12px;color:#666;">Delivery</td><td style="padding:3px 12px;text-align:right;">&#8377;%.0f</td></tr>' % order.shipping_fee
     if order.cod_fee:
         tot_rows += '<tr><td style="padding:3px 12px;color:#666;">COD Fee</td><td style="padding:3px 12px;text-align:right;">&#8377;%.0f</td></tr>' % order.cod_fee
@@ -379,7 +385,7 @@ def _build_customer_html(order) -> str:
     </div>
   </div>
 </div>""".format(
-        cname=order.customer_name, status_msg=status_msg, oid=(order.order_number or order.id),
+        cname=_e(order.customer_name), status_msg=status_msg, oid=(order.order_number or order.id),
         rows=rows, tot_rows=tot_rows, addr=addr, track_block=track_block, gift_block=gift_block,
     )
 
@@ -389,7 +395,7 @@ def send_contact_email(name: str, email: str, phone: str, message: str) -> None:
     if not _email_enabled():
         raise ValueError("Store email is not configured")
     to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
-    safe_msg = (message or "").replace("\n", "<br>")
+    safe_msg = _e(message).replace("\n", "<br>")
     html = """
 <div style="background:#f5f1e8;padding:24px 0;font-family:Arial,Helvetica,sans-serif;color:#2b231e;">
   <div style="max-width:540px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.08);">
@@ -406,7 +412,7 @@ def send_contact_email(name: str, email: str, phone: str, message: str) -> None:
       </div>
     </div>
   </div>
-</div>""".format(name=name, email=email or "-", phone=phone or "-", message=safe_msg)
+</div>""".format(name=_e(name), email=_e(email or "-"), phone=_e(phone or "-"), message=safe_msg)
 
     text = "From %s (%s, %s):\n\n%s" % (name, email, phone, message)
     _deliver(to_addr, "Contact Enquiry from %s" % name, html=html, text=text, reply_to=email or "")
@@ -454,7 +460,7 @@ def build_product_showcase(products, title: str = "Handpicked for You") -> str:
             '<div style="font-size:13px;margin-top:8px;line-height:1.3;">{name}</div>'
             '<div style="font-size:15px;font-weight:bold;color:#7B2D26;">&#8377;{price:.0f}</div>'
             "</a></td>"
-        ).format(s=STORE_URL, slug=p.slug, img=img, name=p.name, price=price)
+        ).format(s=STORE_URL, slug=p.slug, img=_e(img), name=_e(p.name), price=price)
     safe_title = (title or "Handpicked for You").replace("<", "").replace(">", "")
     return (
         '<div style="padding:8px 22px 24px;background:#ffffff;">'
@@ -515,37 +521,53 @@ def send_campaign_email(to_email: str, subject: str, message: str, showcase_html
     _deliver(to_email, subject, html=html, text=message)
 
 
+def _customer_email_args(order):
+    onum = order.order_number or order.id
+    plain = "Thank you for your order #%s with Kirti Thread Art. Total: Rs.%.0f." % (
+        onum, order.total
+    )
+    return (order.email, "Your Kirti Thread Art Order #%s" % onum, _build_customer_html(order), plain)
+
+
 def send_customer_email(order) -> None:
     """Send a branded confirmation email to the customer. Raises on failure."""
     if not order.email:
         raise ValueError("Customer has no email address")
     if not _email_enabled():
         raise ValueError("Store email is not configured")
-    onum = order.order_number or order.id
-    plain = "Thank you for your order #%s with Kirti Thread Art. Total: Rs.%.0f." % (
-        onum, order.total
-    )
-    _deliver(
-        order.email,
-        "Your Kirti Thread Art Order #%s" % onum,
-        html=_build_customer_html(order),
-        text=plain,
-    )
+    to, subject, html, text = _customer_email_args(order)
+    _deliver(to, subject, html=html, text=text)
 
 
-def _send_email(text: str, order):
-    to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
+def _customer_worker(to, subject, html, text):
+    try:
+        _deliver(to, subject, html=html, text=text)
+    except Exception as e:
+        print("[notify] customer email failed:", e)
+
+
+def send_customer_email_bg(order) -> None:
+    """Fire-and-forget confirmation email so checkout never waits on the mail
+    provider. The email is built here (while the DB session is still open) and
+    only the delivery runs in the thread."""
+    if not order.email or not _email_enabled():
+        return
+    threading.Thread(target=_customer_worker, args=_customer_email_args(order), daemon=True).start()
+
+
+def _owner_email_args(order):
     subject = "New Order #%s - Rs.%.0f (%s)" % (
         order.order_number or order.id, order.total, order.customer_name
     )
-    _deliver(to_addr, subject, html=_build_html(order), text=text)
+    return subject, _build_html(order)
 
 
-def _worker(text: str, order):
+def _worker(text: str, subject: str, html: str):
     provider = (settings.NOTIFY_PROVIDER or "none").lower()
     try:
         if provider == "email" and _email_enabled():
-            _send_email(text, order)
+            to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL
+            _deliver(to_addr, subject, html=html, text=text)
         elif provider == "callmebot" and settings.CALLMEBOT_APIKEY:
             _send_callmebot(text)
         elif provider == "greenapi" and settings.GREENAPI_INSTANCE and settings.GREENAPI_TOKEN:
@@ -562,8 +584,8 @@ def notify_password_reset(user):
     html = (
         '<div style="font-family:Arial,sans-serif;color:#2b231e;">'
         '<h2 style="color:#7B2D26;">Password reset requested</h2>'
-        f'<p><b>{user.name}</b> ({user.email}'
-        + (f', {user.phone}' if user.phone else '')
+        f'<p><b>{_e(user.name)}</b> ({_e(user.email)}'
+        + (f', {_e(user.phone)}' if user.phone else '')
         + ') forgot their password and asked for help.</p>'
         '<p>Open the admin panel &rarr; Customers &rarr; Reset Password, '
         'then share the new password with them.</p></div>'
@@ -582,8 +604,10 @@ def notify_owner_order(order):
     """Fire-and-forget notification to the owner about a new order."""
     if (settings.NOTIFY_PROVIDER or "none").lower() == "none":
         return
+    # build everything here — the ORM object must not be touched from the thread
     text = _build_text(order)
-    threading.Thread(target=_worker, args=(text, order), daemon=True).start()
+    subject, html = _owner_email_args(order)
+    threading.Thread(target=_worker, args=(text, subject, html), daemon=True).start()
 
 
 def _low_stock_worker(items):
@@ -611,3 +635,23 @@ def notify_low_stock(items):
     if (settings.NOTIFY_PROVIDER or "none").lower() == "none" or not items:
         return
     threading.Thread(target=_low_stock_worker, args=(items,), daemon=True).start()
+
+
+def _alert_worker(subject: str, text: str):
+    provider = (settings.NOTIFY_PROVIDER or "none").lower()
+    try:
+        if _email_enabled():
+            to_addr = settings.NOTIFY_EMAIL_TO or settings.EMAIL or settings.BREVO_SENDER
+            _deliver(to_addr, subject, text=text)
+        elif provider == "greenapi" and settings.GREENAPI_INSTANCE and settings.GREENAPI_TOKEN:
+            _send_greenapi(text)
+        elif provider == "callmebot" and settings.CALLMEBOT_APIKEY:
+            _send_callmebot(text)
+    except Exception as e:
+        print("[notify] alert failed:", e)
+
+
+def notify_owner_alert(subject: str, text: str) -> None:
+    """Urgent plain-text alert to the owner (e.g. paid but order not created)."""
+    print("[alert]", subject, "-", text)
+    threading.Thread(target=_alert_worker, args=(subject, text), daemon=True).start()

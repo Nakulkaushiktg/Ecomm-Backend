@@ -115,6 +115,8 @@ class Order(Base):
     courier = Column(String(80), default="")
     tracking_id = Column(String(120), default="")
     gift_claimed = Column(Boolean, default=False)  # a loyalty gift ships with this order
+    # loyalty point for this order has been credited (happens on delivery)
+    points_awarded = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     items = relationship(
@@ -218,6 +220,9 @@ class OrderItem(Base):
     price = Column(Float, nullable=False)
     quantity = Column(Integer, default=1)
     variant = Column(String(120), default="")  # e.g. "Size: M, Color: Maroon"
+    # exact variant chosen, so stock can be put back if the order is cancelled
+    size = Column(String(40), default="")
+    color = Column(String(60), default="")
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
@@ -225,3 +230,17 @@ class OrderItem(Base):
     @property
     def product_slug(self) -> str:
         return self.product.slug if self.product else ""
+
+
+class PendingPayment(Base):
+    """Checkout details saved when a Razorpay order is created, so the order can
+    still be placed from the webhook if the customer's browser never returns."""
+    __tablename__ = "pending_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    razorpay_order_id = Column(String(120), unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    payload = Column(JSON, default=dict)  # the OrderCreate body
+    amount_paise = Column(Integer, default=0)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)  # set once placed
+    created_at = Column(DateTime, default=datetime.utcnow)

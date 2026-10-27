@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
+import urllib.parse
 import urllib.request
 
 from .config import settings
@@ -49,4 +50,23 @@ def verify_signature(order_id: str, payment_id: str, signature: str) -> bool:
     expected = hmac.new(
         settings.RAZORPAY_KEY_SECRET.encode(), msg, hashlib.sha256
     ).hexdigest()
+    return hmac.compare_digest(expected, signature or "")
+
+
+def fetch_order(order_id: str) -> dict:
+    """Fetch a Razorpay order (used to read the amount actually charged)."""
+    req = urllib.request.Request(
+        f"{API_BASE}/orders/{urllib.parse.quote(order_id, safe='')}",
+        headers={"Authorization": _auth_header()},
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+def verify_webhook(body: bytes, signature: str) -> bool:
+    """Webhook signature = HMAC_SHA256(raw body, webhook secret)."""
+    secret = settings.RAZORPAY_WEBHOOK_SECRET
+    if not secret:
+        return False
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature or "")

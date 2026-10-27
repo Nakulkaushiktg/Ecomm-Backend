@@ -444,3 +444,18 @@ class RazorpayCreateResponse(BaseModel):
     razorpay_key_id: str
     amount: int          # paise
     currency: str = "INR"
+
+
+class RazorpayCreateRequest(ShippingQuoteRequest):
+    """Cart + (optionally) the full checkout form. When the form is sent, the
+    order can still be placed from Razorpay's webhook if the browser never
+    comes back after paying."""
+    customer_name: str = ""
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    pincode: str = ""
+    note: str = ""
+    claim_gift: bool = False

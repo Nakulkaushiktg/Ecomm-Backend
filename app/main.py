@@ -34,13 +34,25 @@ def _run_migrations():
         "ALTER TABLE settings ADD COLUMN IF NOT EXISTS show_loyalty BOOLEAN DEFAULT TRUE",
         "ALTER TABLE settings ADD COLUMN IF NOT EXISTS stat_orders VARCHAR(20) DEFAULT '500'",
         "ALTER TABLE settings ADD COLUMN IF NOT EXISTS stat_designs VARCHAR(20) DEFAULT '50'",
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS size VARCHAR(40) DEFAULT ''",
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS color VARCHAR(60) DEFAULT ''",
+        # existing orders already got their point when placed (old behaviour), so
+        # mark them awarded; new orders start FALSE and earn it on delivery
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS points_awarded BOOLEAN",
+        "UPDATE orders SET points_awarded = (user_id IS NOT NULL AND total >= 1000) "
+        "WHERE points_awarded IS NULL",
+        # one order per Razorpay payment (blocks signature replay / double submit)
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_razorpay_payment_id "
+        "ON orders (razorpay_payment_id) WHERE razorpay_payment_id <> ''",
     ]
-    with engine.begin() as conn:
-        for s in stmts:
-            try:
+    for s in stmts:
+        # own transaction per statement: on Postgres one failure would otherwise
+        # abort every statement after it
+        try:
+            with engine.begin() as conn:
                 conn.execute(text(s))
-            except Exception as e:  # pragma: no cover
-                print("[migrate] skip:", e)
+        except Exception as e:  # pragma: no cover
+            print("[migrate] skip:", e)
 
 
 _run_migrations()

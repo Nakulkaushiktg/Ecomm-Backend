@@ -1,15 +1,17 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..auth import (
     verify_credentials, create_access_token, require_admin,
-    hash_password, verify_password,
+    hash_password,
 )
+from ..order_ops import change_status
+from ..ratelimit import rate_limit
 from ..utils import slugify
 from ..store import get_settings
 from ..notify import send_customer_email
@@ -105,7 +107,8 @@ def delete_customer(
 
 
 @router.post("/login", response_model=schemas.TokenResponse)
-def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(payload: schemas.LoginRequest, request: Request, db: Session = Depends(get_db)):
+    rate_limit(request, "admin-login", max_calls=5, window_sec=900)
     if not verify_credentials(db, payload.username, payload.password):
         raise HTTPException(401, "Invalid username or password")
     return schemas.TokenResponse(access_token=create_access_token(payload.username))
@@ -126,8 +129,8 @@ def change_credentials(
     elif not cfg.admin_username:
         cfg.admin_username = payload.current_username
     if payload.new_password:
-        if len(payload.new_password) < 4:
-            raise HTTPException(400, "New password must be at least 4 characters")
+        if len(payload.new_password) < 8:
+            raise HTTPException(400, "New password must be at least 8 characters")
         cfg.admin_password_hash = hash_password(payload.new_password)
     db.commit()
     return {"ok": True, "username": cfg.admin_username}
@@ -176,7 +179,7 @@ def create_product(
     _: str = Depends(require_admin),
 ):
     data = payload.model_dump()
-    variants = data.pop("variants", [])
+    data.pop("variants", None)
     product = models.Product(**data)
     product.slug = _unique_slug(db, payload.name)
     _apply_variants(product, payload.variants)
@@ -280,20 +283,6 @@ def admin_get_order(
     return order
 
 
-@router.delete("/orders/{order_id}")
-def delete_order(
-    order_id: int,
-    db: Session = Depends(get_db),
-    _: str = Depends(require_admin),
-):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(404, "Order not found")
-    db.delete(order)  # cascade removes order items
-    db.commit()
-    return {"ok": True}
-
-
 @router.put("/orders/{order_id}/status", response_model=schemas.OrderOut)
 def update_order_status(
     order_id: int,
@@ -307,7 +296,8 @@ def update_order_status(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
-    order.status = payload.status
+    # also puts stock back on cancel and credits loyalty points on delivery
+    change_status(db, order, payload.status)
     db.commit()
     db.refresh(order)
     return order
